@@ -1,0 +1,91 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url("https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700&display=swap");
+
+/* Optional: add public/fonts/nightingale.woff2 (OFL) for Death of Typography Nightingale */
+@font-face {
+  font-family: "Nightingale";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/nightingale.woff2") format("woff2");
+}
+
+/*
+ * Animated blobs must live on body pseudo-elements, not html::before:
+ * body sat above html::before in the stack, so transparent body backgrounds
+ * only showed html’s black — never the animation.
+ */
+html {
+  background-color: #000;
+  min-height: 100%;
+}
+
+body {
+  isolation: isolate;
+  position: relative;
+  min-height: 100vh;
+  margin: 0;
+  background-color: transparent;
+}
+
+/* Subtle violet wash (static — terminal UI reads cleaner without heavy motion) */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.35;
+  background:
+    radial-gradient(
+      ellipse 70% 55% at 20% 30%,
+      rgba(88, 28, 135, 0.45),
+      transparent 55%
+    ),
+    radial-gradient(
+      ellipse 60% 50% at 85% 70%,
+      rgba(59, 7, 100, 0.5),
+      transparent 50%
+    );
+}
+
+/* Uplink-style wire grid over near-black */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(124, 58, 237, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(124, 58, 237, 0.045) 1px, transparent 1px),
+    radial-gradient(rgba(167, 139, 250, 0.06) 1px, transparent 1px);
+  background-size:
+    32px 32px,
+    32px 32px,
+    20px 20px;
+  background-position: 0 0, 0 0, 0 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::before {
+    opacity: 0.22;
+  }
+}
+
+/* All direct body children (Next.js root) above ::before / ::after */
+body > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Italic emphasis: Fraunces (loaded normal + italic via next/font in layout) */
+em,
+i {
+  font-family: var(--font-fraunces), ui-serif, Georgia, serif;
+  font-style: italic;
+}
+

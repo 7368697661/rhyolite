@@ -1,0 +1,110 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum MessageRole {
+  user
+  model
+}
+
+model Glyph {
+  id                String   @id @default(cuid())
+  name              String
+  systemInstruction String   @default("")
+  model             String   @default("gemini-3.1-pro-preview")
+  temperature       Float    @default(0.7)
+  maxOutputTokens   Int      @default(2048)
+
+  chats             Chat[]
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+model Chat {
+  id        String @id @default(cuid())
+  title     String
+
+  glyphId   String
+  /// Leaf message of the currently viewed branch (walk parents to build the visible thread).
+  activeTipMessageId String?
+  /// JSON map: userMessageId -> selected modelMessageId for each fork (optional; client can override).
+  branchChoicesJson  String @default("{}")
+
+  glyph     Glyph @relation(fields: [glyphId], references: [id], onDelete: Restrict)
+  
+  documentId String?
+  document   Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+
+  messages  ChatMessage[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ChatMessage {
+  id        String @id @default(cuid())
+  chatId    String
+  role      MessageRole
+  content   String
+  createdAt DateTime @default(now())
+  /// Previous message in this branch: user continues a model; model answers a user; alternates share the same parent user.
+  parentMessageId String?
+  parent          ChatMessage?  @relation("MessageBranch", fields: [parentMessageId], references: [id], onDelete: SetNull)
+  children        ChatMessage[] @relation("MessageBranch")
+
+  chat      Chat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@index([chatId, createdAt])
+  @@index([parentMessageId])
+}
+
+model Project {
+  id           String       @id @default(cuid())
+  name         String
+  storyOutline String       @default("")
+  loreBible    String       @default("")
+  documents    Document[]
+  wikiEntries  WikiEntry[]
+
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+}
+
+model Document {
+  id          String   @id @default(cuid())
+  title       String
+  content     String   @default("")
+  orderIndex  Float    @default(0)
+
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  chats       Chat[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model WikiEntry {
+  id          String   @id @default(cuid())
+  title       String
+  content     String   @default("")
+  aliases     String   @default("")
+
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
