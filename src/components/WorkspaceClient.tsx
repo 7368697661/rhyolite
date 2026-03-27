@@ -12,8 +12,9 @@ export type Project = {
   loreBible: string;
   updatedAt?: string;
 };
-export type Document = { id: string; title: string; content: string; projectId: string };
-export type WikiEntry = { id: string; title: string; content: string; aliases: string; projectId: string };
+export type Folder = { id: string; name: string; type: "document" | "wiki"; projectId: string; };
+export type Document = { id: string; title: string; content: string; projectId: string; folderId?: string | null; };
+export type WikiEntry = { id: string; title: string; content: string; aliases: string; projectId: string; folderId?: string | null; };
 
 export type ActiveItem = {
   type: "document" | "wiki" | "project_settings";
@@ -26,6 +27,7 @@ export default function WorkspaceClient() {
 
   const [documents, setDocuments] = useState<Document[]>([]);
   const [wikiEntries, setWikiEntries] = useState<WikiEntry[]>([]);
+  const [folders, setFolders] = useState<Folder[]>([]);
 
   // Navigation History Stack
   const [history, setHistory] = useState<ActiveItem[]>([]);
@@ -54,12 +56,14 @@ export default function WorkspaceClient() {
   }, []);
 
   const reloadProjectData = async (projectId: string) => {
-    const [docsRes, wikiRes] = await Promise.all([
+    const [docsRes, wikiRes, foldersRes] = await Promise.all([
       fetch(`/api/documents?projectId=${projectId}`),
       fetch(`/api/wiki?projectId=${projectId}`),
+      fetch(`/api/folders?projectId=${projectId}`),
     ]);
     if (docsRes.ok) setDocuments(await docsRes.json());
     if (wikiRes.ok) setWikiEntries(await wikiRes.json());
+    if (foldersRes.ok) setFolders(await foldersRes.json());
   };
 
   useEffect(() => {
@@ -71,6 +75,7 @@ export default function WorkspaceClient() {
     } else {
       setDocuments([]);
       setWikiEntries([]);
+      setFolders([]);
       setHistory([]);
       setHistoryIndex(-1);
     }
@@ -114,10 +119,11 @@ export default function WorkspaceClient() {
 
   return (
     <div className="flex h-full w-full flex-col">
-      <header className="flex shrink-0 items-center justify-between border-b border-violet-600/40 bg-black px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-violet-400 [text-shadow:0_0_12px_rgba(167,139,250,0.25)]">
-        <div className="flex min-w-0 items-center gap-3">
+      <header className="flex shrink-0 items-center justify-between border-b border-violet-600/40 bg-black px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.2em] text-violet-400 [text-shadow:0_0_12px_rgba(167,139,250,0.5)]">
+        <div className="flex min-w-0 items-center gap-3 relative">
+          <div className="absolute inset-0 bg-violet-500/10 blur-xl opacity-50 pointer-events-none animate-pulse-fast"></div>
           <span className="font-heading tracking-wide text-violet-200">
-            Rhyolite
+            RHYOLITE_OS //
           </span>
           <span className="hidden text-violet-700 sm:inline">//</span>
           <span className="hidden truncate text-violet-500/90 sm:inline">
@@ -140,6 +146,7 @@ export default function WorkspaceClient() {
               onReloadProjects={reloadProjects}
               documents={documents}
               wikiEntries={wikiEntries}
+              folders={folders}
               onReloadProjectData={() =>
                 activeProjectId && reloadProjectData(activeProjectId)
               }

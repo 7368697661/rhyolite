@@ -97,12 +97,8 @@ export async function POST(req: Request) {
   const promptChain = chain.slice(0, lastUserIdx + 1);
   const targetUser = chain[lastUserIdx];
 
-  const contents = promptChain.map((m) => ({
-    role: m.role as "user" | "model",
-    parts: [{ text: m.content }],
-  }));
-
   let systemInstruction = glyph.systemInstruction;
+  let ragContextText = "";
 
   if (chat.documentId) {
     const document = await prisma.document.findUnique({
@@ -116,23 +112,55 @@ export async function POST(req: Request) {
 
     if (document?.project) {
       const p = document.project;
-      if (p.storyOutline) {
-        systemInstruction += `\n\n---\nCHAPTER OUTLINE / PREVIOUS EVENTS:\n${p.storyOutline}`;
-      }
+
       if (p.loreBible) {
-        systemInstruction += `\n\n---\nSTORY / LORE BIBLE:\n${p.loreBible}`;
+        systemInstruction += `\n\n---\nCORE CANON / METAPHYSICS (ALWAYS ON):\n${p.loreBible}`;
       }
-      if (p.wikiEntries.length > 0) {
-        systemInstruction += `\n\n---\nWIKI ENTRIES:\n`;
-        for (const entry of p.wikiEntries) {
-          systemInstruction += `\n### ${entry.title}\n${entry.content}\n`;
+      if (p.storyOutline) {
+        systemInstruction += `\n\n---\nSTORY OUTLINE:\n${p.storyOutline}`;
+      }
+
+      // Keyword-based Wiki RAG
+      const recentUserText = promptChain.slice(-3).map(m => m.content).join("\n").toLowerCase();
+      const draftText = document.content ? document.content.slice(-4000).toLowerCase() : "";
+      const searchCorpus = recentUserText + "\n" + draftText;
+
+      const matchedWikis = p.wikiEntries.filter(w => {
+        const title = w.title.toLowerCase();
+        const aliases = w.aliases.toLowerCase().split(",").map(s => s.trim()).filter(Boolean);
+        if (searchCorpus.includes(title)) return true;
+        for (const a of aliases) {
+          if (searchCorpus.includes(a)) return true;
+        }
+        return false;
+      });
+
+      if (matchedWikis.length > 0) {
+        ragContextText += `[RETRIEVED WIKI ENTRIES (For Context)]\n`;
+        for (const entry of matchedWikis) {
+          ragContextText += `### ${entry.title}\n${entry.content}\n\n`;
         }
       }
+
       if (document.content) {
-        systemInstruction += `\n\n---\nCURRENT CHAPTER DRAFT:\n${document.content}\n\n(Please do not repeat the chapter text, only use it as context unless specifically asked to edit it.)`;
+        ragContextText += `\n[CURRENT CHAPTER DRAFT]\n${document.content}\n\n(Note: The above is the current state of the chapter. Do not repeat it verbatim unless rewriting. Use it to inform your continuation.)\n`;
       }
     }
   }
+
+  const contents = promptChain.map((m, idx) => {
+    const isLatestUser = idx === promptChain.length - 1 && m.role === "user";
+    let text = m.content;
+
+    if (isLatestUser && ragContextText) {
+      text = `${ragContextText}\n---\n[NEW USER MESSAGE]\n${text}`;
+    }
+
+    return {
+      role: m.role as "user" | "model",
+      parts: [{ text }],
+    };
+  });
 
   const abortSignal = req.signal;
   const deltas = await streamGeminiText({

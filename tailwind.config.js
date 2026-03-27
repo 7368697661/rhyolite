@@ -4,6 +4,24 @@ module.exports = {
   darkMode: "class",
   theme: {
     extend: {
+      animation: {
+        'scanline': 'scanline 8s linear infinite',
+        'glitch': 'glitch 3s infinite',
+        'pulse-fast': 'pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+      },
+      keyframes: {
+        scanline: {
+          '0%': { transform: 'translateY(-100%)' },
+          '100%': { transform: 'translateY(100vh)' }
+        },
+        glitch: {
+          '0%, 100%': { transform: 'translate(0)' },
+          '20%': { transform: 'translate(-2px, 1px)' },
+          '40%': { transform: 'translate(-1px, -1px)' },
+          '60%': { transform: 'translate(2px, 1px)' },
+          '80%': { transform: 'translate(1px, -1px)' },
+        }
+      },
       fontFamily: {
         sans: [
           "Satoshi",

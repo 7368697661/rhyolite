@@ -7,6 +7,7 @@ const WikiEntryUpdateSchema = z.object({
   title: z.string().min(1).optional(),
   content: z.string().optional(),
   aliases: z.string().optional(),
+  folderId: z.string().nullable().optional(),
 });
 
 export async function GET(req: Request, { params }: any) {

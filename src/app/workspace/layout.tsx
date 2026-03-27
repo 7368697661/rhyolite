@@ -7,6 +7,7 @@ export default function WorkspaceLayout({
 }) {
   return (
     <div className="h-screen w-screen overflow-hidden bg-black">
+      <div className="scanline-beam"></div>
       {children}
     </div>
   );

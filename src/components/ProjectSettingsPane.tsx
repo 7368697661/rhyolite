@@ -89,10 +89,10 @@ export default function ProjectSettingsPane({
       <div className="flex min-h-0 flex-1 flex-col gap-0 overflow-y-auto">
         <div className="flex flex-col gap-2 border-b border-violet-800/40 px-4 py-4 md:px-6">
           <label className="text-[10px] font-semibold uppercase tracking-[0.18em] text-violet-500">
-            Chapter outline
+            Story outline (Always-on)
           </label>
           <p className="text-xs text-violet-800">
-            Plot sequence and direction — injected into AI context with your wiki.
+            High-level sequence and direction. Injected into system memory permanently.
           </p>
           <textarea
             value={storyOutline}
@@ -106,10 +106,10 @@ export default function ProjectSettingsPane({
 
         <div className="flex flex-col gap-2 px-4 py-4 md:px-6">
           <label className="text-[10px] font-semibold uppercase tracking-[0.18em] text-violet-500">
-            Story / Lore bible
+            Core Canon / Metaphysics (Always-on)
           </label>
           <p className="text-xs text-violet-800">
-            World rules, magic, cast — long-form context for the model.
+            Hard invariants, tone, and world rules. For specific characters/locations, use the Lore Wiki (they are retrieved dynamically via RAG).
           </p>
           <textarea
             value={loreBible}

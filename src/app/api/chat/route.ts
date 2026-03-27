@@ -182,7 +182,10 @@ export async function POST(req: Request) {
     });
   }
 
+  const chainToRootList = await chainToRoot(chatId!, userMsg.id);
+  
   let systemInstruction = glyph.systemInstruction;
+  let ragContextText = "";
 
   if (chatRow?.documentId) {
     const document = await prisma.document.findUnique({
@@ -196,25 +199,42 @@ export async function POST(req: Request) {
 
     if (document?.project) {
       const p = document.project;
-      if (p.storyOutline) {
-        systemInstruction += `\n\n---\nCHAPTER OUTLINE / PREVIOUS EVENTS:\n${p.storyOutline}`;
-      }
+      
       if (p.loreBible) {
-        systemInstruction += `\n\n---\nSTORY / LORE BIBLE:\n${p.loreBible}`;
+        systemInstruction += `\n\n---\nCORE CANON / METAPHYSICS (ALWAYS ON):\n${p.loreBible}`;
       }
-      if (p.wikiEntries.length > 0) {
-        systemInstruction += `\n\n---\nWIKI ENTRIES:\n`;
-        for (const entry of p.wikiEntries) {
-          systemInstruction += `\n### ${entry.title}\n${entry.content}\n`;
+      if (p.storyOutline) {
+        systemInstruction += `\n\n---\nSTORY OUTLINE:\n${p.storyOutline}`;
+      }
+
+      // Keyword-based Wiki RAG
+      const recentUserText = chainToRootList.slice(-3).map(m => m.content).join("\n").toLowerCase();
+      const draftText = document.content ? document.content.slice(-4000).toLowerCase() : "";
+      const searchCorpus = recentUserText + "\n" + draftText;
+
+      const matchedWikis = p.wikiEntries.filter(w => {
+        const title = w.title.toLowerCase();
+        const aliases = w.aliases.toLowerCase().split(",").map(s => s.trim()).filter(Boolean);
+        if (searchCorpus.includes(title)) return true;
+        for (const a of aliases) {
+          if (searchCorpus.includes(a)) return true;
+        }
+        return false;
+      });
+
+      if (matchedWikis.length > 0) {
+        ragContextText += `[RETRIEVED WIKI ENTRIES (For Context)]\n`;
+        for (const entry of matchedWikis) {
+          ragContextText += `### ${entry.title}\n${entry.content}\n\n`;
         }
       }
+
       if (document.content) {
-        systemInstruction += `\n\n---\nCURRENT CHAPTER DRAFT:\n${document.content}\n\n(Please do not repeat the chapter text, only use it as context unless specifically asked to edit it.)`;
+        ragContextText += `\n[CURRENT CHAPTER DRAFT]\n${document.content}\n\n(Note: The above is the current state of the chapter. Do not repeat it verbatim unless rewriting. Use it to inform your continuation.)\n`;
       }
     }
   }
 
-  const chain = await chainToRoot(chatId!, userMsg.id);
   const attachmentParts: Array<{
     text?: string;
     inlineData?: { data: string; mimeType: string };
@@ -232,18 +252,26 @@ export async function POST(req: Request) {
     return acc;
   }, [] as Array<{ text?: string; inlineData?: { data: string; mimeType: string } }>);
 
-  const contents = chain.map((m, idx) => {
+  const contents = chainToRootList.map((m, idx) => {
     const isLatestUser =
-      idx === chain.length - 1 && m.role === "user" && attachmentParts.length > 0;
-    if (!isLatestUser) {
+      idx === chainToRootList.length - 1 && m.role === "user";
+    
+    let text = m.content;
+    
+    // Inject the RAG + Draft context ONLY into the final user message to save systemInstruction bloat
+    if (isLatestUser && ragContextText) {
+      text = `${ragContextText}\n---\n[NEW USER MESSAGE]\n${text}`;
+    }
+
+    if (!isLatestUser || attachmentParts.length === 0) {
       return {
         role: m.role,
-        parts: [{ text: m.content }],
+        parts: [{ text }],
       };
     }
     return {
       role: m.role,
-      parts: [{ text: m.content }, ...attachmentParts],
+      parts: [{ text }, ...attachmentParts],
     };
   });
 

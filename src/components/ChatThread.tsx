@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -10,6 +10,7 @@ import {
   messagesById,
   parseBranchChoices,
   siblingModelsForUser,
+  type BranchMessage,
 } from "@/lib/messageBranch";
 
 type ChatMessage = {
@@ -67,7 +68,7 @@ function PaperclipIcon() {
   );
 }
 
-function Markdown({ content }: { content: string }) {
+const Markdown = React.memo(function Markdown({ content }: { content: string }) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -103,10 +104,79 @@ function Markdown({ content }: { content: string }) {
       {content}
     </ReactMarkdown>
   );
-}
+});
 
 const messageBody =
   "w-full whitespace-pre-wrap px-3 py-3 text-sm leading-relaxed text-violet-100/90 md:px-4";
+
+const MessageRow = React.memo(function MessageRow({
+  m,
+  isUser,
+  prev,
+  renderForkControls,
+  showRegen,
+  onRegenerate,
+  onAppendToDocument,
+  isStreaming,
+}: {
+  m: BranchMessage;
+  isUser: boolean;
+  prev: BranchMessage | null;
+  renderForkControls: (userMsgId: string, currentModelId: string) => React.ReactNode;
+  showRegen: boolean;
+  onRegenerate: () => void;
+  onAppendToDocument?: (text: string) => void;
+  isStreaming: boolean;
+}) {
+  return (
+    <div className="flex flex-col">
+      <div className={messageBody}>
+        <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-violet-600">
+          {isUser ? "You" : "Model"}
+        </div>
+        <div
+          className={
+            isUser
+              ? "text-violet-100/95"
+              : "text-violet-200 [text-shadow:0_0_12px_rgba(167,139,250,0.12)]"
+          }
+        >
+          <Markdown content={m.content} />
+        </div>
+      </div>
+      {!isUser && prev?.role === "user" ? (
+        <div className="border-t border-violet-900/50 px-3 py-2 md:px-4">
+          {renderForkControls(prev.id, m.id)}
+        </div>
+      ) : null}
+      {!isUser && showRegen ? (
+        <div className="flex flex-wrap gap-2 border-t border-violet-900/50 px-3 py-2 md:px-4">
+          <button
+            type="button"
+            onClick={onRegenerate}
+            disabled={isStreaming}
+            className="border border-violet-600/50 bg-violet-950/50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-violet-200 hover:border-violet-400 disabled:cursor-not-allowed disabled:opacity-50"
+            aria-label="Regenerate response"
+            title="Regenerate response"
+          >
+            Regen
+          </button>
+          {onAppendToDocument && (
+            <button
+              type="button"
+              onClick={() => onAppendToDocument(m.content)}
+              disabled={isStreaming}
+              className="border border-violet-800/80 bg-black px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-violet-400 hover:border-violet-600 disabled:cursor-not-allowed disabled:opacity-50"
+              title="Append to document"
+            >
+              + Doc
+            </button>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+});
 
 export default function ChatThread({
   chatId,
@@ -129,6 +199,18 @@ export default function ChatThread({
   const [streamRole, setStreamRole] = useState<"chat" | "regen" | null>(null);
   
   const [safetyPreset, setSafetyPreset] = useState<"none" | "low" | "medium" | "high">("none");
+  const [estimatedTokens, setEstimatedTokens] = useState<number>(0);
+
+  // Simple token estimator: ~3.5 chars per token for english text
+  useEffect(() => {
+    let totalChars = 0;
+    for (const m of allMessages) {
+      totalChars += m.content.length;
+    }
+    totalChars += input.length;
+    // Add ~2000 chars overhead for base system prompt / draft context padding
+    setEstimatedTokens(Math.ceil((totalChars + 2000) / 3.5));
+  }, [allMessages, input]);
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const [attachments, setAttachments] = useState<AttachmentDraft[]>([]);
@@ -206,9 +288,21 @@ export default function ChatThread({
     );
   }, [input, isStreaming, isReadingAttachments]);
 
+  const [isAutoScroll, setIsAutoScroll] = useState(true);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+
+  const handleScroll = useCallback(() => {
+    if (!scrollContainerRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
+    const distanceToBottom = scrollHeight - scrollTop - clientHeight;
+    setIsAutoScroll(distanceToBottom < 30);
+  }, []);
+
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [displayPath.length, isStreaming, streamDraft]);
+    if (isAutoScroll) {
+      endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
+  }, [displayPath.length, isStreaming, streamDraft, isAutoScroll]);
 
   async function persistBranchSwitch(
     nextChoices: Record<string, string>,
@@ -509,14 +603,23 @@ export default function ChatThread({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="shrink-0 border-b border-violet-600/40 px-3 py-1.5">
-        <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-violet-500">
-          Assistant
-        </span>
-        <span className="ml-2 text-[10px] text-violet-800">// comms</span>
+      <div className="shrink-0 border-b border-violet-600/40 px-3 py-1.5 flex justify-between items-center">
+        <div>
+          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-violet-500">
+            Assistant
+          </span>
+          <span className="ml-2 text-[10px] text-violet-800">// comms</span>
+        </div>
+        <div className="text-[10px] uppercase tracking-wider text-violet-700" title="Estimated context token size">
+          ctx: ~{estimatedTokens.toLocaleString()}
+        </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div
+        ref={scrollContainerRef}
+        onScroll={handleScroll}
+        className="min-h-0 flex-1 overflow-y-auto"
+      >
         {displayPath.length === 0 && !isStreaming ? (
           <div className="border-b border-violet-900/50 px-3 py-4 text-xs uppercase tracking-wider text-violet-800">
             No traffic — send to open channel.
@@ -527,56 +630,20 @@ export default function ChatThread({
           {displayPath.map((m, i) => {
             const isUser = m.role === "user";
             const prev = i > 0 ? displayPath[i - 1] : null;
+            const isLastModel = showRegenOnLastModel && m.id === lastModelOnPath?.id;
 
             return (
-              <div key={m.id} className="flex flex-col">
-                <div className={messageBody}>
-                  <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-violet-600">
-                    {isUser ? "You" : "Model"}
-                  </div>
-                  <div
-                    className={
-                      isUser
-                        ? "text-violet-100/95"
-                        : "text-violet-200 [text-shadow:0_0_12px_rgba(167,139,250,0.12)]"
-                    }
-                  >
-                    <Markdown content={m.content} />
-                  </div>
-                </div>
-                {!isUser && prev?.role === "user" ? (
-                  <div className="border-t border-violet-900/50 px-3 py-2 md:px-4">
-                    {renderForkControls(prev.id, m.id)}
-                  </div>
-                ) : null}
-                {!isUser &&
-                showRegenOnLastModel &&
-                m.id === lastModelOnPath?.id ? (
-                  <div className="flex flex-wrap gap-2 border-t border-violet-900/50 px-3 py-2 md:px-4">
-                    <button
-                      type="button"
-                      onClick={() => onRegenerate().catch(() => {})}
-                      disabled={isStreaming}
-                      className="border border-violet-600/50 bg-violet-950/50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-violet-200 hover:border-violet-400 disabled:cursor-not-allowed disabled:opacity-50"
-                      aria-label="Regenerate response"
-                      title="Regenerate response"
-                    >
-                      Regen
-                    </button>
-                    {onAppendToDocument && (
-                      <button
-                        type="button"
-                        onClick={() => onAppendToDocument(m.content)}
-                        disabled={isStreaming}
-                        className="border border-violet-800/80 bg-black px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-violet-400 hover:border-violet-600 disabled:cursor-not-allowed disabled:opacity-50"
-                        title="Append to document"
-                      >
-                        + Doc
-                      </button>
-                    )}
-                  </div>
-                ) : null}
-              </div>
+              <MessageRow
+                key={m.id}
+                m={m}
+                isUser={isUser}
+                prev={prev}
+                renderForkControls={renderForkControls}
+                showRegen={!!isLastModel}
+                onRegenerate={() => onRegenerate().catch(() => {})}
+                onAppendToDocument={onAppendToDocument}
+                isStreaming={isStreaming}
+              />
             );
           })}
 

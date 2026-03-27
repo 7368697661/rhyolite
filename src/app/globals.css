@@ -52,7 +52,7 @@ body::before {
     );
 }
 
-/* Uplink-style wire grid over near-black */
+/* Cyberpunk-style scanlines and wire grid over near-black */
 body::after {
   content: "";
   position: fixed;
@@ -60,14 +60,36 @@ body::after {
   z-index: 0;
   pointer-events: none;
   background-image:
+    linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%),
+    linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06)),
     linear-gradient(rgba(124, 58, 237, 0.045) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(124, 58, 237, 0.045) 1px, transparent 1px),
-    radial-gradient(rgba(167, 139, 250, 0.06) 1px, transparent 1px);
+    linear-gradient(90deg, rgba(124, 58, 237, 0.045) 1px, transparent 1px);
   background-size:
+    100% 2px,
+    3px 100%,
     32px 32px,
-    32px 32px,
-    20px 20px;
-  background-position: 0 0, 0 0, 0 0;
+    32px 32px;
+  background-position: 0 0, 0 0, 0 0, 0 0;
+  opacity: 0.8;
+}
+
+/* Animated scanning beam */
+.scanline-beam {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 10px;
+  background: linear-gradient(to bottom, transparent, rgba(139, 92, 246, 0.4), transparent);
+  opacity: 0.5;
+  pointer-events: none;
+  z-index: 50;
+  animation: scanline 8s linear infinite;
+}
+
+@keyframes scanline {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100vh); }
 }
 
 @media (prefers-reduced-motion: reduce) {

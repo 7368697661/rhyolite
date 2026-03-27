@@ -69,16 +69,33 @@ model ChatMessage {
   @@index([parentMessageId])
 }
 
+model ProjectFolder {
+  id        String   @id @default(cuid())
+  name      String
+  type      String   // "document" or "wiki"
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  documents   Document[]
+  wikiEntries WikiEntry[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([projectId])
+}
+
 model Project {
-  id           String       @id @default(cuid())
+  id           String          @id @default(cuid())
   name         String
-  storyOutline String       @default("")
-  loreBible    String       @default("")
+  storyOutline String          @default("")
+  loreBible    String          @default("")
   documents    Document[]
   wikiEntries  WikiEntry[]
+  folders      ProjectFolder[]
 
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
 }
 
 model Document {
@@ -89,6 +106,9 @@ model Document {
 
   projectId   String
   project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  folderId    String?
+  folder      ProjectFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
 
   chats       Chat[]
 
@@ -104,6 +124,9 @@ model WikiEntry {
 
   projectId   String
   project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  folderId    String?
+  folder      ProjectFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
 
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
