@@ -5,6 +5,16 @@
   <strong>Terminal-inspired creative + research environment with multi-provider LLMs, DAG reasoning, and hybrid RAG.</strong>
 </p>
 
+<p align="center">
+  <a href="https://github.com/7368697661/rhyolite"><img alt="GitHub Repo" src="https://img.shields.io/badge/github-7368697661%2Frhyolite-violet?style=flat-square&logo=github" /></a>
+  <img alt="License" src="https://img.shields.io/badge/license-BSL_1.1-blueviolet?style=flat-square" />
+  <img alt="Next.js" src="https://img.shields.io/badge/Next.js-15-black?style=flat-square&logo=nextdotjs" />
+  <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=white" />
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white" />
+  <img alt="Tailwind" src="https://img.shields.io/badge/Tailwind_CSS-3-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white" />
+  <img alt="Storage" src="https://img.shields.io/badge/storage-local_filesystem-555?style=flat-square" />
+</p>
+
 ### What it is
 - Local-first, single-user writing and research IDE with an integrated multi-provider LLM assistant
 - Terminal/hacker aesthetic UI (3-pane layout: file tree, editor, chat) — no cloud, no database, all files on disk as Markdown and JSON
