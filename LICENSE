@@ -1,0 +1,109 @@
+Copyright (c) 2026 7368697661. All rights reserved.
+
+Licensed Work "Rhyolite_OS" — see Parameters below.
+
+---
+
+Business Source License 1.1
+
+License text copyright (c) 2017 MariaDB Corporation Ab, All Rights Reserved.
+"Business Source License" is a trademark of MariaDB Corporation Ab.
+
+Parameters
+
+Licensor: 7368697661 (https://github.com/7368697661)
+Licensed Work: Rhyolite_OS
+Change Date: 2030-03-30
+Change License: Apache License, Version 2.0
+
+Additional Use Grant:
+
+You may make use of the Licensed Work, provided that you do not use the
+Licensed Work for a Production Purpose.
+
+Production Purpose — what this restricts:
+
+  "Production Purpose" means using the Licensed Work in ways that directly
+  support commercial revenue or commercial operations, including:
+
+  (a) Providing the Licensed Work (or a hosted or packaged derivative) to
+      third parties as a paid or monetized product or service — for example
+      selling access, running it as multi-tenant SaaS, or bundling it in a
+      commercial product without a separate commercial license from the
+      Licensor.
+
+  (b) Deploying the Licensed Work inside a for-profit entity primarily to
+      support that entity's revenue-generating work — for example as the
+      mandated internal authoring stack for deliverables sold to customers,
+      when that deployment is not covered by (c) below.
+
+Production Purpose — typical non-production use (allowed without a commercial
+license under this Additional Use Grant):
+
+  - Personal creative work: writing, worldbuilding, or research for yourself,
+    without charging others for access to the software itself.
+
+  - Hobby or volunteer projects where you are not operating as a commercial
+    service provider using this codebase.
+
+  - Academic or good-faith research and teaching use at schools and
+    universities.
+
+  - Evaluation: installing, running locally, and contributing patches to
+    decide whether to adopt or purchase a commercial license.
+
+  - After the Change Date (2030-03-30), or for any version that has already
+    converted under the Change License, the Apache 2.0 terms apply instead
+    of these Production Purpose restrictions for that version.
+
+If you are unsure whether your use is a Production Purpose, contact the
+Licensor for clarification or a commercial license.
+
+Terms
+
+The Licensor hereby grants you the right to copy, modify, create derivative
+works, redistribute, and make non-production use of the Licensed Work. The
+Licensor may make an Additional Use Grant, above, permitting limited
+production use.
+
+Effective on the Change Date, or the fourth anniversary of the first
+publicly available distribution of a specific version of the Licensed Work
+under this License, whichever comes first, the Licensor hereby grants you
+the rights provided under the Change License, and the rights granted under
+this Business Source License shall terminate.
+
+If your use of the Licensed Work does not comply with the requirements
+currently in effect as described in this License, you must purchase a
+commercial license from the Licensor, its affiliated entities, or
+authorized resellers, or you must refrain from using the Licensed Work.
+
+All copies of the original and modified Licensed Work, and derivative works
+of the Licensed Work, are subject to this License. This License applies
+separately for each version of the Licensed Work and the Change Date may
+vary for each version of the Licensed Work released by Licensor.
+
+You must conspicuously display this License on each original or modified
+copy of the Licensed Work. If you receive the Licensed Work in original or
+modified form from a third party, the terms and conditions set forth in
+this License apply to your use of that work.
+
+Any use of the Licensed Work in violation of this License will
+automatically terminate your rights under this License for the current and
+all other versions of the Licensed Work.
+
+This License does not grant you any right to use Licensor's or its
+affiliates' trademarks, service marks, logos, or trade names.
+
+TO THE EXTENT PERMITTED BY APPLICABLE LAW, THE LICENSED WORK IS PROVIDED
+"AS IS" AND THE LICENSOR OFFERS NO WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE OR NON-INFRINGEMENT.
+
+IN NO EVENT SHALL THE LICENSOR BE LIABLE TO YOU OR ANY THIRD PARTY FOR ANY
+DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+OUT OF THE USE OF THE LICENSED WORK, EVEN IF ADVISED OF THE POSSIBILITY OF
+SUCH DAMAGE.
