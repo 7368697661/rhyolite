@@ -157,6 +157,26 @@ export default function DocumentEditorPane({
     handleSave(newContent);
   };
 
+  const resolveEntityPreview = useCallback((entityTitle: string) => {
+    const lowerTitle = entityTitle.toLowerCase();
+    const wiki = wikiEntries.find((w) => {
+      const aliases = w.aliases
+        .toLowerCase()
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      return w.title.toLowerCase() === lowerTitle || aliases.includes(lowerTitle);
+    });
+    if (wiki) {
+      return { title: wiki.title, snippet: (wiki.content || "").slice(0, 200) };
+    }
+    const doc = documents.find((d) => d.title.toLowerCase() === lowerTitle);
+    if (doc) {
+      return { title: doc.title, snippet: (doc.content || "").slice(0, 200) };
+    }
+    return null;
+  }, [wikiEntries, documents]);
+
   if (activeItem?.type === "network") {
     return (
       <div className="flex h-full min-h-0 flex-col">
@@ -344,26 +364,6 @@ export default function DocumentEditorPane({
       setInfillInstruction("");
     }
   };
-
-  const resolveEntityPreview = useCallback((entityTitle: string) => {
-    const lowerTitle = entityTitle.toLowerCase();
-    const wiki = wikiEntries.find((w) => {
-      const aliases = w.aliases
-        .toLowerCase()
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean);
-      return w.title.toLowerCase() === lowerTitle || aliases.includes(lowerTitle);
-    });
-    if (wiki) {
-      return { title: wiki.title, snippet: (wiki.content || "").slice(0, 200) };
-    }
-    const doc = documents.find((d) => d.title.toLowerCase() === lowerTitle);
-    if (doc) {
-      return { title: doc.title, snippet: (doc.content || "").slice(0, 200) };
-    }
-    return null;
-  }, [wikiEntries, documents]);
 
   const onEntityLinkClick = (entityTitle: string) => {
     const lowerTitle = entityTitle.toLowerCase();
