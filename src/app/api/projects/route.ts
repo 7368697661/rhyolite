@@ -1,5 +1,5 @@
-import { prisma } from "@/lib/prisma";
 import { z } from "zod";
+import { listProjects, writeProject, generateId, listDocuments, listWikiEntries } from "@/lib/fs-db";
 
 export const dynamic = "force-dynamic";
 
@@ -10,13 +10,24 @@ const ProjectCreateSchema = z.object({
 });
 
 export async function GET() {
-  const projects = await prisma.project.findMany({
-    orderBy: { createdAt: "desc" },
-    include: {
-      _count: { select: { documents: true, wikiEntries: true } }
-    }
-  });
-  return Response.json(projects);
+  const projects = await listProjects();
+  // We need to add `_count` so the UI doesn't break
+  const enriched = await Promise.all(
+    projects.map(async (p) => {
+      const docs = await listDocuments(p.id);
+      const wikis = await listWikiEntries(p.id);
+      return {
+        ...p,
+        name: p.title,
+        _count: {
+          documents: docs.length,
+          wikiEntries: wikis.length,
+        },
+      };
+    })
+  );
+  enriched.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  return Response.json(enriched);
 }
 
 export async function POST(req: Request) {
@@ -29,8 +40,15 @@ export async function POST(req: Request) {
     });
   }
 
-  const project = await prisma.project.create({
-    data: parsed.data,
-  });
-  return Response.json(project, { status: 201 });
+  const project = {
+    id: generateId(),
+    title: parsed.data.name,
+    loreBible: parsed.data.loreBible || "",
+    storyOutline: parsed.data.storyOutline || "",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  await writeProject(project);
+  return Response.json({ ...project, name: project.title }, { status: 201 });
 }

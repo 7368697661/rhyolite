@@ -1,20 +1,19 @@
-import { prisma } from "@/lib/prisma";
 import { z } from "zod";
+import { readGlyphs, writeGlyphs, generateId, type FsGlyph } from "@/lib/fs-db";
 
 export const dynamic = "force-dynamic";
 
 const GlyphCreateSchema = z.object({
   name: z.string().min(1),
   systemInstruction: z.string().optional(),
+  provider: z.enum(["gemini", "openai", "anthropic"]).optional(),
   model: z.string().optional(),
   temperature: z.number().min(0).max(2).optional(),
   maxOutputTokens: z.number().min(1).optional(),
 });
 
 export async function GET() {
-  const glyphs = await prisma.glyph.findMany({
-    orderBy: { createdAt: "desc" },
-  });
+  const glyphs = await readGlyphs();
   return Response.json(glyphs);
 }
 
@@ -29,9 +28,18 @@ export async function POST(req: Request) {
     });
   }
 
-  const glyph = await prisma.glyph.create({
-    data: parsed.data,
-  });
+  const glyphs = await readGlyphs();
+  const glyph: FsGlyph = {
+    id: generateId(),
+    name: parsed.data.name,
+    systemInstruction: parsed.data.systemInstruction || "",
+    provider: parsed.data.provider || "gemini",
+    model: parsed.data.model || "gemini-2.5-flash",
+    temperature: parsed.data.temperature || 0.7,
+    maxOutputTokens: parsed.data.maxOutputTokens || 2048,
+  };
+  glyphs.push(glyph);
+  await writeGlyphs(glyphs);
 
   return Response.json(glyph, { status: 201 });
 }

@@ -1,6 +1,13 @@
 import { useState } from "react";
 import Link from "next/link";
-import type { Project, Document, WikiEntry, ActiveItem, Folder } from "./WorkspaceClient";
+import type {
+  Project,
+  Document,
+  WikiEntry,
+  ActiveItem,
+  Folder,
+  Timeline,
+} from "./WorkspaceClient";
 
 export default function ProjectSidebar({
   projects,
@@ -9,6 +16,7 @@ export default function ProjectSidebar({
   onReloadProjects,
   documents,
   wikiEntries,
+  timelines,
   folders,
   onReloadProjectData,
   activeItem,
@@ -20,6 +28,7 @@ export default function ProjectSidebar({
   onReloadProjects: () => void;
   documents: Document[];
   wikiEntries: WikiEntry[];
+  timelines: Timeline[];
   folders: Folder[];
   onReloadProjectData: () => void;
   activeItem: ActiveItem | null;
@@ -28,6 +37,10 @@ export default function ProjectSidebar({
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  const [dragOverFolder, setDragOverFolder] = useState<{
+    type: "document" | "wiki";
+    folderId: string;
+  } | null>(null);
 
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -68,6 +81,18 @@ export default function ProjectSidebar({
     onReloadProjectData();
   };
 
+  const handleCreateTimeline = async () => {
+    if (!activeProjectId) return;
+    const title = prompt("Timeline title:");
+    if (!title) return;
+    await fetch("/api/timelines", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, projectId: activeProjectId }),
+    });
+    onReloadProjectData();
+  };
+
   const handleCreateFolder = async (type: "document" | "wiki") => {
     if (!activeProjectId) return;
     const name = prompt("Folder name:");
@@ -90,8 +115,8 @@ export default function ProjectSidebar({
     onReloadProjectData();
   };
 
-  const onDragStart = (e: React.DragEvent, type: "document" | "wiki", id: string) => {
-    e.dataTransfer.setData("application/json", JSON.stringify({ type, id }));
+  const onDragStart = (e: React.DragEvent, type: "document" | "wiki", id: string, title: string) => {
+    e.dataTransfer.setData("application/json", JSON.stringify({ type, id, title }));
     // A little cyberpunk visual trick on drag
     if (e.target instanceof HTMLElement) {
       e.target.style.opacity = "0.5";
@@ -135,22 +160,33 @@ export default function ProjectSidebar({
       <div
         key={doc.id}
         draggable
-        onDragStart={(e) => onDragStart(e, "document", doc.id)}
+        onDragStart={(e) => onDragStart(e, "document", doc.id, doc.title)}
         onDragEnd={onDragEnd}
         className={`group/item relative border-b border-violet-900/40 ${depth > 0 ? "pl-4" : ""}`}
       >
         <button
           onClick={() => onNavigate({ type: "document", id: doc.id })}
-          className={`flex w-full items-center gap-2 px-2 py-2 pr-8 text-left transition-colors ${
+          className={`group flex w-full items-center gap-2 px-2 py-1 pr-8 text-left transition-colors font-mono text-[11px] ${
             isActive
-              ? "border-l-2 border-violet-400 bg-violet-950/50 text-violet-100 [text-shadow:0_0_10px_rgba(167,139,250,0.2)]"
-              : "border-l-2 border-transparent text-violet-300/80 hover:bg-violet-950/30 hover:text-violet-100"
+              ? "bg-violet-500 text-black shadow-uv-glow"
+              : "text-violet-300 hover:bg-violet-500 hover:text-black"
           }`}
         >
-          <svg className="h-4 w-4 shrink-0 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
-          </svg>
-          <span className="truncate">{doc.title}</span>
+          <span className="opacity-50 group-hover:opacity-100">{isActive ? ">" : "-"}</span>
+          <span className="truncate flex-1">{doc.title}</span>
+        </button>
+        <button
+          onClick={async (e) => {
+            e.stopPropagation();
+            if (confirm(`Delete document "${doc.title}"?`)) {
+              await fetch(`/api/documents/${doc.id}`, { method: "DELETE" });
+              onReloadProjectData();
+            }
+          }}
+          className="absolute right-8 top-1/2 -translate-y-1/2 opacity-0 group-hover/item:opacity-100 hover:text-red-400 transition-opacity p-1 text-[8px] font-bold tracking-widest text-violet-600"
+          title="Delete"
+        >
+          [DEL]
         </button>
         <button
           onClick={async (e) => {
@@ -182,22 +218,33 @@ export default function ProjectSidebar({
       <div
         key={wiki.id}
         draggable
-        onDragStart={(e) => onDragStart(e, "wiki", wiki.id)}
+        onDragStart={(e) => onDragStart(e, "wiki", wiki.id, wiki.title)}
         onDragEnd={onDragEnd}
         className={`group/item relative border-b border-violet-900/40 ${depth > 0 ? "pl-4" : ""}`}
       >
         <button
           onClick={() => onNavigate({ type: "wiki", id: wiki.id })}
-          className={`flex w-full items-center gap-2 px-2 py-2 pr-8 text-left transition-colors ${
+          className={`group flex w-full items-center gap-2 px-2 py-1 pr-8 text-left transition-colors font-mono text-[11px] ${
             isActive
-              ? "border-l-2 border-violet-400 bg-violet-950/50 text-violet-100 [text-shadow:0_0_10px_rgba(167,139,250,0.2)]"
-              : "border-l-2 border-transparent text-violet-300/80 hover:bg-violet-950/30 hover:text-violet-100"
+              ? "bg-violet-500 text-black shadow-uv-glow"
+              : "text-violet-300 hover:bg-violet-500 hover:text-black"
           }`}
         >
-          <svg className="h-4 w-4 shrink-0 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
-          </svg>
-          <span className="truncate">{wiki.title}</span>
+          <span className="opacity-50 group-hover:opacity-100">{isActive ? ">" : "-"}</span>
+          <span className="truncate flex-1">{wiki.title}</span>
+        </button>
+        <button
+          onClick={async (e) => {
+            e.stopPropagation();
+            if (confirm(`Delete artifact "${wiki.title}"?`)) {
+              await fetch(`/api/wiki/${wiki.id}`, { method: "DELETE" });
+              onReloadProjectData();
+            }
+          }}
+          className="absolute right-8 top-1/2 -translate-y-1/2 opacity-0 group-hover/item:opacity-100 hover:text-red-400 transition-opacity p-1 text-[8px] font-bold tracking-widest text-violet-600"
+          title="Delete"
+        >
+          [DEL]
         </button>
         <button
           onClick={async (e) => {
@@ -223,11 +270,67 @@ export default function ProjectSidebar({
     );
   };
 
+  const renderTimelineItem = (timeline: Timeline) => {
+    const isActive = activeItem?.type === "timeline" && activeItem.id === timeline.id;
+    return (
+      <div
+        key={timeline.id}
+        className={`group/item relative border-b border-violet-900/40`}
+      >
+        <button
+          onClick={() => onNavigate({ type: "timeline", id: timeline.id })}
+          className={`group flex w-full items-center gap-2 px-2 py-1 pr-8 text-left transition-colors font-mono text-[11px] ${
+            isActive
+              ? "bg-violet-500 text-black shadow-uv-glow"
+              : "text-violet-300 hover:bg-violet-500 hover:text-black"
+          }`}
+        >
+          <span className="opacity-50 group-hover:opacity-100">{isActive ? ">" : "-"}</span>
+          <span className="truncate flex-1">{timeline.title}</span>
+        </button>
+        <button
+          onClick={async (e) => {
+            e.stopPropagation();
+            if (confirm(`Delete timeline "${timeline.title}"?`)) {
+              await fetch(`/api/timelines/${timeline.id}`, { method: "DELETE" });
+              onReloadProjectData();
+            }
+          }}
+          className="absolute right-8 top-1/2 -translate-y-1/2 opacity-0 group-hover/item:opacity-100 hover:text-red-400 transition-opacity p-1 text-[8px] font-bold tracking-widest text-violet-600"
+          title="Delete"
+        >
+          [DEL]
+        </button>
+        <button
+          onClick={async (e) => {
+            e.stopPropagation();
+            const newTitle = prompt("Rename timeline:", timeline.title);
+            if (newTitle && newTitle !== timeline.title) {
+              await fetch(`/api/timelines/${timeline.id}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ title: newTitle }),
+              });
+              onReloadProjectData();
+            }
+          }}
+          className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover/item:opacity-100 hover:text-violet-300 transition-opacity p-1"
+          title="Rename"
+        >
+          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+          </svg>
+        </button>
+      </div>
+    );
+  };
+
   return (
-    <div className="flex h-full flex-col gap-0 overflow-y-auto text-sm text-violet-100/90">
-      <div className="flex flex-col gap-2 border-b border-violet-600/30 px-3 py-3">
-        <label className="text-[10px] font-semibold uppercase tracking-[0.18em] text-violet-500">
-          Project
+    <div className="flex h-full flex-col gap-0 overflow-hidden font-mono text-[11px] text-violet-300">
+      <div className="flex flex-col gap-2 border-b border-violet-600/50 bg-[#050308] px-3 py-3 relative">
+        <div className="absolute top-0 left-0 w-1 h-1 border-t border-l border-violet-400"></div>
+        <label className="text-[10px] font-bold uppercase tracking-[0.2em] text-violet-500">
+          :: Project Directory
         </label>
         {isCreatingProject ? (
           <form onSubmit={handleCreateProject} className="flex gap-2">
@@ -241,15 +344,15 @@ export default function ProjectSidebar({
             />
             <button
               type="submit"
-              className="border border-violet-500/60 bg-violet-950/80 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-violet-200 hover:border-violet-400 hover:bg-violet-900/60"
+              className="border border-violet-500/60 bg-violet-950/80 px-2 py-1.5 text-[10px] font-bold uppercase tracking-widest text-violet-200 hover:border-violet-400 hover:bg-violet-900/60"
             >
-              Save
+              [ + ]
             </button>
           </form>
         ) : (
           <div className="flex items-center gap-2">
             <select
-              className="flex-1 truncate border border-violet-600/50 bg-black py-1.5 pl-2 pr-8 text-sm text-violet-100 outline-none hover:border-violet-500/70 focus:border-violet-400 focus:shadow-uv-glow"
+              className="flex-1 truncate border border-violet-600/50 bg-[#020005] py-1.5 pl-2 pr-8 text-violet-200 outline-none hover:border-violet-400 hover:bg-violet-950/30 focus:border-violet-400 focus:shadow-uv-glow cursor-pointer transition-colors"
               value={activeProjectId || ""}
               onChange={(e) => {
                 if (e.target.value === "__NEW__") {
@@ -271,53 +374,108 @@ export default function ProjectSidebar({
 
       {activeProjectId && (
         <>
+          <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="flex flex-col gap-1 border-b border-violet-600/50 px-3 py-3 min-h-[100px]">
+            <div className="group flex items-center justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-violet-500">
+                :: TIMELINES
+              </span>
+              <div className="flex items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100">
+                <button
+                  type="button"
+                  onClick={handleCreateTimeline}
+                  className="text-[10px] font-bold uppercase tracking-widest text-violet-600 hover:text-violet-300"
+                  title="New Timeline"
+                >
+                  [+TLN]
+                </button>
+              </div>
+            </div>
+            <div className="flex flex-col mt-2 font-mono">
+              {timelines.map(t => renderTimelineItem(t))}
+              {timelines.length === 0 && (
+                <span className="px-2 py-2 text-xs text-violet-800">No timelines yet</span>
+              )}
+            </div>
+          </div>
           <div 
-            className="flex flex-col gap-1 border-b border-violet-600/30 px-3 py-3 min-h-[100px]"
+            className="flex flex-col gap-1 border-b border-violet-600/50 px-3 py-3 min-h-[100px]"
             onDragOver={onDragOver}
-            onDrop={(e) => onDrop(e, "document", null)}
+            onDrop={(e) => {
+              setDragOverFolder(null);
+              onDrop(e, "document", null);
+            }}
           >
             <div className="group flex items-center justify-between">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-violet-500">
-                Story
+              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-violet-500">
+                :: CRYSTAL_DB
               </span>
               <div className="flex items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100">
                 <button
                   type="button"
                   onClick={() => handleCreateFolder("document")}
-                  className="text-[10px] font-semibold uppercase tracking-wide text-violet-600 hover:text-violet-300"
+                  className="text-[10px] font-bold uppercase tracking-widest text-violet-600 hover:text-violet-300"
                   title="New Folder"
                 >
-                  + Fld
+                  [+DIR]
                 </button>
                 <button
                   type="button"
                   onClick={handleCreateDocument}
-                  className="text-[10px] font-semibold uppercase tracking-wide text-violet-600 hover:text-violet-300"
+                  className="text-[10px] font-bold uppercase tracking-widest text-violet-600 hover:text-violet-300"
                   title="New Document"
                 >
-                  + Doc
+                  [+DOC]
                 </button>
               </div>
             </div>
-            <div className="flex flex-col">
+            <div className="flex flex-col mt-2 font-mono">
               {folders.filter(f => f.type === "document").map(folder => (
-                <div key={folder.id} className="flex flex-col border-b border-violet-900/40">
+                <div key={folder.id} className="flex flex-col border-b border-violet-900/40 font-mono">
                   <div 
-                    className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-violet-400 hover:bg-violet-950/30 hover:text-violet-200 cursor-pointer"
+                    className={`group flex w-full items-center gap-2 px-2 py-1 text-left text-violet-400 hover:bg-violet-500 hover:text-black cursor-pointer transition-colors ${
+                      dragOverFolder?.type === "document" && dragOverFolder.folderId === folder.id
+                        ? "bg-violet-950/60 border-l-2 border-violet-400 text-violet-100 pl-1"
+                        : ""
+                    }`}
                     onClick={() => toggleFolder(folder.id)}
-                    onDragOver={onDragOver}
-                    onDrop={(e) => { e.stopPropagation(); onDrop(e, "document", folder.id); }}
+                    onDragEnter={(e) => {
+                      e.preventDefault();
+                      setDragOverFolder({ type: "document", folderId: folder.id });
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setDragOverFolder({ type: "document", folderId: folder.id });
+                    }}
+                    onDragLeave={() => {
+                      setDragOverFolder((s) =>
+                        s?.type === "document" && s.folderId === folder.id ? null : s
+                      );
+                    }}
+                    onDrop={(e) => {
+                      e.stopPropagation();
+                      setDragOverFolder(null);
+                      onDrop(e, "document", folder.id);
+                    }}
                   >
-                    <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={expandedFolders.has(folder.id) ? "M19.5 8.25l-7.5 7.5-7.5-7.5" : "M8.25 4.5l7.5 7.5-7.5 7.5"} />
-                    </svg>
-                    <svg className="h-4 w-4 shrink-0 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z" />
-                    </svg>
-                    <span className="truncate font-semibold text-xs uppercase tracking-wider">{folder.name}</span>
+                    <span className="font-bold">{expandedFolders.has(folder.id) ? "[-]" : "[+]"}</span>
+                    <span className="truncate font-bold uppercase tracking-widest flex-1">{folder.name}/</span>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (activeProjectId) {
+                          window.open(`/api/projects/${activeProjectId}/export?folderId=${folder.id}`, "_blank");
+                        }
+                      }}
+                      className="shrink-0 text-[9px] font-bold uppercase tracking-widest text-violet-700 opacity-0 group-hover:opacity-100 hover:text-violet-300 transition-opacity"
+                      title={`Export "${folder.name}" folder`}
+                    >
+                      [EXP]
+                    </button>
                   </div>
                   {expandedFolders.has(folder.id) && (
-                    <div className="flex flex-col border-l-2 border-violet-900/30 ml-2">
+                    <div className="flex flex-col border-l-2 border-violet-900/30 ml-2 animate-in fade-in duration-150">
                       {documents.filter(d => d.folderId === folder.id).map(d => renderDocumentItem(d, 1))}
                     </div>
                   )}
@@ -331,52 +489,70 @@ export default function ProjectSidebar({
           </div>
 
           <div 
-            className="flex flex-col gap-1 border-b border-violet-600/30 px-3 py-3 min-h-[100px]"
+            className="flex flex-col gap-1 border-b border-violet-600/50 px-3 py-3 min-h-[100px]"
             onDragOver={onDragOver}
-            onDrop={(e) => onDrop(e, "wiki", null)}
+            onDrop={(e) => {
+              setDragOverFolder(null);
+              onDrop(e, "wiki", null);
+            }}
           >
             <div className="group flex items-center justify-between">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-violet-500">
-                Lore Wiki
+              <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-violet-500">
+                :: ARTIFACTS
               </span>
               <div className="flex items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100">
                 <button
                   type="button"
                   onClick={() => handleCreateFolder("wiki")}
-                  className="text-[10px] font-semibold uppercase tracking-wide text-violet-600 hover:text-violet-300"
+                  className="text-[10px] font-bold uppercase tracking-widest text-violet-600 hover:text-violet-300"
                   title="New Folder"
                 >
-                  + Fld
+                  [+DIR]
                 </button>
                 <button
                   type="button"
                   onClick={handleCreateWiki}
-                  className="text-[10px] font-semibold uppercase tracking-wide text-violet-600 hover:text-violet-300"
+                  className="text-[10px] font-bold uppercase tracking-widest text-violet-600 hover:text-violet-300"
                   title="New Wiki"
                 >
-                  + Wiki
+                  [+ENT]
                 </button>
               </div>
             </div>
-            <div className="flex flex-col">
+            <div className="flex flex-col mt-2 font-mono">
               {folders.filter(f => f.type === "wiki").map(folder => (
-                <div key={folder.id} className="flex flex-col border-b border-violet-900/40">
+                <div key={folder.id} className="flex flex-col border-b border-violet-900/40 font-mono">
                   <div 
-                    className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-violet-400 hover:bg-violet-950/30 hover:text-violet-200 cursor-pointer"
+                    className={`group flex w-full items-center gap-2 px-2 py-1 text-left text-violet-400 hover:bg-violet-500 hover:text-black cursor-pointer transition-colors ${
+                      dragOverFolder?.type === "wiki" && dragOverFolder.folderId === folder.id
+                        ? "bg-violet-950/60 border-l-2 border-violet-400 text-violet-100 pl-1"
+                        : ""
+                    }`}
                     onClick={() => toggleFolder(folder.id)}
-                    onDragOver={onDragOver}
-                    onDrop={(e) => { e.stopPropagation(); onDrop(e, "wiki", folder.id); }}
+                    onDragEnter={(e) => {
+                      e.preventDefault();
+                      setDragOverFolder({ type: "wiki", folderId: folder.id });
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setDragOverFolder({ type: "wiki", folderId: folder.id });
+                    }}
+                    onDragLeave={() => {
+                      setDragOverFolder((s) =>
+                        s?.type === "wiki" && s.folderId === folder.id ? null : s
+                      );
+                    }}
+                    onDrop={(e) => {
+                      e.stopPropagation();
+                      setDragOverFolder(null);
+                      onDrop(e, "wiki", folder.id);
+                    }}
                   >
-                    <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={expandedFolders.has(folder.id) ? "M19.5 8.25l-7.5 7.5-7.5-7.5" : "M8.25 4.5l7.5 7.5-7.5 7.5"} />
-                    </svg>
-                    <svg className="h-4 w-4 shrink-0 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z" />
-                    </svg>
-                    <span className="truncate font-semibold text-xs uppercase tracking-wider">{folder.name}</span>
+                    <span className="font-bold">{expandedFolders.has(folder.id) ? "[-]" : "[+]"}</span>
+                    <span className="truncate font-bold uppercase tracking-widest flex-1">{folder.name}/</span>
                   </div>
                   {expandedFolders.has(folder.id) && (
-                    <div className="flex flex-col border-l-2 border-violet-900/30 ml-2">
+                    <div className="flex flex-col border-l-2 border-violet-900/30 ml-2 animate-in fade-in duration-150">
                       {wikiEntries.filter(w => w.folderId === folder.id).map(w => renderWikiItem(w, 1))}
                     </div>
                   )}
@@ -387,6 +563,7 @@ export default function ProjectSidebar({
                 <span className="px-2 py-2 text-xs text-violet-800">No entries yet</span>
               )}
             </div>
+          </div>
           </div>
           <div className="flex flex-col gap-1 px-3 py-3">
             <div className="flex items-center justify-between">
@@ -417,13 +594,27 @@ export default function ProjectSidebar({
 
               <Link
                 href="/glyphs"
-                className="flex items-center gap-2 border-l-2 border-transparent px-2 py-2 text-left text-violet-300/80 transition-colors hover:bg-violet-950/30 hover:text-violet-100"
+                className="flex items-center gap-2 border-b border-violet-900/40 border-l-2 border-transparent px-2 py-2 text-left text-violet-300/80 transition-colors hover:bg-violet-950/30 hover:text-violet-100"
               >
                 <svg className="h-4 w-4 shrink-0 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
                 </svg>
                 <span className="truncate">Manage Glyphs</span>
               </Link>
+              <button
+                type="button"
+                onClick={() => {
+                  if (activeProjectId) {
+                    window.open(`/api/projects/${activeProjectId}/export`, "_blank");
+                  }
+                }}
+                className="flex items-center gap-2 border-l-2 border-transparent px-2 py-2 text-left text-violet-300/80 transition-colors hover:bg-violet-950/30 hover:text-violet-100"
+              >
+                <svg className="h-4 w-4 shrink-0 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                </svg>
+                <span className="truncate">Export Manuscript</span>
+              </button>
             </div>
           </div>
         </>

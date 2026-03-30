@@ -8,6 +8,8 @@ module.exports = {
         'scanline': 'scanline 8s linear infinite',
         'glitch': 'glitch 3s infinite',
         'pulse-fast': 'pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+        'blink': 'blink 1s step-end infinite',
+        'cpu': 'cpu 1s ease-in-out infinite alternate',
       },
       keyframes: {
         scanline: {
@@ -20,6 +22,18 @@ module.exports = {
           '40%': { transform: 'translate(-1px, -1px)' },
           '60%': { transform: 'translate(2px, 1px)' },
           '80%': { transform: 'translate(1px, -1px)' },
+        },
+        blink: {
+          '0%, 100%': { opacity: '1' },
+          '50%': { opacity: '0' },
+        },
+        cpu: {
+          '0%': { height: '10%' },
+          '20%': { height: '80%' },
+          '40%': { height: '30%' },
+          '60%': { height: '90%' },
+          '80%': { height: '40%' },
+          '100%': { height: '60%' },
         }
       },
       fontFamily: {
@@ -29,12 +43,14 @@ module.exports = {
           "system-ui",
           "sans-serif",
         ],
-        /** Alias for prose / editor (same as sans; keeps existing class names) */
+        /** Alias for prose / editor */
         body: [
-          "Satoshi",
-          "ui-sans-serif",
-          "system-ui",
-          "sans-serif",
+          '"Monaspace Neon"',
+          "monospace",
+        ],
+        mono: [
+          '"Monaspace Neon"',
+          "monospace",
         ],
         heading: [
           '"Nightingale"',

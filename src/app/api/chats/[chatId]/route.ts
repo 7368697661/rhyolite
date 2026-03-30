@@ -1,41 +1,31 @@
-import { prisma } from "@/lib/prisma";
 import { z } from "zod";
+import { writeChat } from "@/lib/fs-db";
+import { findChatScope } from "../scope";
 
 export const dynamic = "force-dynamic";
 
 const ChatUpdateSchema = z.object({
-  title: z.string().min(1).optional(),
-  glyphId: z.string().min(1).optional(),
-  activeTipMessageId: z.string().min(1).nullable().optional(),
-  branchChoicesJson: z.string().optional(),
-  documentId: z.string().optional().nullable(),
+  glyphId: z.string().min(1),
 });
 
-export async function PUT(
+export async function PATCH(
   req: Request,
-  { params }: any
+  { params }: { params: Promise<{ chatId: string }> }
 ) {
+  const { chatId } = await params;
   const json = await req.json().catch(() => null);
   const parsed = ChatUpdateSchema.safeParse(json);
   if (!parsed.success) {
-    return new Response(
-      JSON.stringify({ error: "Invalid payload", details: parsed.error }),
-      { status: 400, headers: { "Content-Type": "application/json" } }
-    );
+    return Response.json({ error: "Invalid payload" }, { status: 400 });
   }
 
-  const updated = await prisma.chat.update({
-    where: { id: params.chatId },
-    data: parsed.data,
-  });
-  return Response.json(updated);
-}
+  const scope = await findChatScope(chatId);
+  if (!scope) return Response.json({ error: "Chat not found" }, { status: 404 });
 
-export async function DELETE(
-  _req: Request,
-  { params }: any
-) {
-  await prisma.chat.delete({ where: { id: params.chatId } });
-  return new Response(null, { status: 204 });
-}
+  scope.chat.glyphId = parsed.data.glyphId;
+  scope.chat.updatedAt = new Date().toISOString();
 
+  await writeChat(scope.projectId, scope.chat);
+
+  return Response.json(scope.chat);
+}

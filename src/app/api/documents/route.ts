@@ -1,5 +1,5 @@
-import { prisma } from "@/lib/prisma";
 import { z } from "zod";
+import { listDocuments, writeDocument, generateId, type FsDocument } from "@/lib/fs-db";
 
 export const dynamic = "force-dynamic";
 
@@ -20,10 +20,8 @@ export async function GET(req: Request) {
     });
   }
 
-  const documents = await prisma.document.findMany({
-    where: { projectId },
-    orderBy: { orderIndex: "asc" },
-  });
+  const documents = await listDocuments(projectId);
+  documents.sort((a, b) => a.orderIndex - b.orderIndex);
   return Response.json(documents);
 }
 
@@ -37,15 +35,22 @@ export async function POST(req: Request) {
     });
   }
 
-  // Set orderIndex to place it at the end
-  const lastDoc = await prisma.document.findFirst({
-    where: { projectId: parsed.data.projectId },
-    orderBy: { orderIndex: "desc" },
-  });
+  const projectId = parsed.data.projectId;
+  const docs = await listDocuments(projectId);
+  const lastDoc = docs.sort((a, b) => b.orderIndex - a.orderIndex)[0];
   const orderIndex = lastDoc ? lastDoc.orderIndex + 1 : 0;
 
-  const doc = await prisma.document.create({
-    data: { ...parsed.data, orderIndex },
-  });
+  const doc: FsDocument = {
+    id: generateId(),
+    projectId,
+    title: parsed.data.title,
+    content: parsed.data.content || "",
+    folderId: null,
+    orderIndex,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  await writeDocument(doc);
   return Response.json(doc, { status: 201 });
 }

@@ -4,29 +4,34 @@ import { useState, useEffect } from "react";
 import ChatThread from "./ChatThread";
 import type { ActiveItem } from "./WorkspaceClient";
 
-type ChatPreview = { id: string; title: string };
+type ChatPreview = { id: string; title: string; glyphId: string };
 
 export default function ChatPane({
   activeItem,
   activeProjectId,
+  activeTimelineEventId,
   onAppendToDocument,
 }: {
   activeItem: ActiveItem | null;
   activeProjectId: string | null;
-  onAppendToDocument: (text: string) => void;
+  activeTimelineEventId?: string | null;
+  onAppendToDocument: (text: string) => void | Promise<void>;
 }) {
   const [chat, setChat] = useState<ChatPreview | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [glyphs, setGlyphs] = useState<{ id: string; name: string }[]>([]);
 
-  // Fetch glyphs
   useEffect(() => {
-    fetch("/api/glyphs").then((r) => r.json()).then(setGlyphs);
+    fetch("/api/glyphs")
+      .then((r) => r.json())
+      .then(setGlyphs);
   }, []);
 
-  const loadChat = async (docId: string) => {
+  const loadChat = async (kind: "document" | "timeline", id: string) => {
     setIsLoading(true);
-    const res = await fetch(`/api/chats?documentId=${docId}`);
+    const q =
+      kind === "document" ? `documentId=${id}` : `timelineId=${id}`;
+    const res = await fetch(`/api/chats?${q}`);
     if (res.ok) {
       const chats = await res.json();
       if (chats.length > 0) {
@@ -40,7 +45,9 @@ export default function ChatPane({
 
   useEffect(() => {
     if (activeItem?.type === "document") {
-      loadChat(activeItem.id);
+      loadChat("document", activeItem.id);
+    } else if (activeItem?.type === "timeline") {
+      loadChat("timeline", activeItem.id);
     } else {
       setChat(null);
     }
@@ -48,7 +55,9 @@ export default function ChatPane({
 
   const handleCreateChat = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (activeItem?.type !== "document") return;
+    if (!activeProjectId) return;
+    if (activeItem?.type !== "document" && activeItem?.type !== "timeline")
+      return;
 
     const fd = new FormData(e.currentTarget);
     const glyphId = fd.get("glyphId") as string;
@@ -58,14 +67,23 @@ export default function ChatPane({
       return;
     }
 
+    const body =
+      activeItem.type === "document"
+        ? {
+            title: "Document Assistant",
+            glyphId,
+            documentId: activeItem.id,
+          }
+        : {
+            title: "Timeline Assistant",
+            glyphId,
+            timelineId: activeItem.id,
+          };
+
     const res = await fetch("/api/chats", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title: "Document Assistant",
-        glyphId,
-        documentId: activeItem.id,
-      }),
+      body: JSON.stringify(body),
     });
 
     if (res.ok) {
@@ -78,34 +96,21 @@ export default function ChatPane({
 
   if (!activeItem) {
     return (
-      <div className="flex h-full items-center justify-center border-t border-violet-900/50 px-3 text-center text-xs uppercase tracking-wider text-violet-800">
-        <p>No item selected</p>
+      <div className="flex h-full items-center justify-center border-t border-violet-900/50 px-3 text-center text-[10px] uppercase tracking-widest text-violet-800 font-mono">
+        <p>[ OFFLINE ]</p>
       </div>
     );
   }
 
   if (activeItem.type === "wiki" || activeItem.type === "project_settings") {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 border-t border-violet-900/50 px-4 py-6 text-center">
-        <svg
-          className="h-10 w-10 text-violet-800"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={1}
-            d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25"
-          />
-        </svg>
-        <p className="text-sm text-violet-600">
-          Chat offline —{" "}
-          {activeItem.type === "wiki" ? "Lore Wiki" : "Project Settings"}.
+      <div className="flex h-full flex-col items-center justify-center gap-3 border-t border-violet-900/50 px-4 py-6 text-center font-mono">
+        <span className="text-violet-800 text-2xl animate-pulse">_</span>
+        <p className="text-[10px] text-violet-600 uppercase tracking-widest">
+          SYS.{activeItem.type === "wiki" ? "LORE_DB" : "CONFIG"}
         </p>
-        <p className="text-[10px] uppercase tracking-wider text-violet-800">
-          Open a chapter to link the assistant.
+        <p className="text-[9px] uppercase tracking-wider text-violet-800">
+          [ COMMLINK UNAVAILABLE ]
         </p>
       </div>
     );
@@ -120,28 +125,37 @@ export default function ChatPane({
   }
 
   if (!chat) {
+    const ctxLabel =
+      activeItem.type === "timeline" ? "timeline DAG" : "chapter";
     return (
       <div className="flex h-full min-h-0 flex-col border-t border-violet-900/50">
-        <div className="border-b border-violet-600/40 px-3 py-2">
+        <div className="border-b border-violet-600/40 px-3 py-2 bg-[#020005]">
           <h2 className="text-[10px] font-bold uppercase tracking-[0.2em] text-violet-500">
-            Assistant
+            :: Assistant_Initialization
           </h2>
-          <p className="mt-1 text-xs text-violet-700">
-            Attach a glyph session to this chapter.
+          <p className="mt-1 text-xs text-violet-700 font-mono">
+            Attach a glyph session to this {ctxLabel}.
           </p>
         </div>
         <div className="flex flex-1 flex-col justify-center px-4 py-6">
-          <form onSubmit={handleCreateChat} className="mx-auto flex w-full max-w-sm flex-col gap-3">
-            <div>
-              <label className="mb-1 block text-[10px] font-semibold uppercase tracking-[0.15em] text-violet-500">
-                Glyph
+          <form
+            onSubmit={handleCreateChat}
+            className="mx-auto flex w-full max-w-sm flex-col gap-3 font-mono"
+          >
+            <div className="relative border border-violet-700/50 bg-[#020005] p-3">
+              <div className="absolute top-0 left-0 w-1.5 h-1.5 border-t border-l border-violet-500"></div>
+              <div className="absolute top-0 right-0 w-1.5 h-1.5 border-t border-r border-violet-500"></div>
+              <div className="absolute bottom-0 left-0 w-1.5 h-1.5 border-b border-l border-violet-500"></div>
+              <div className="absolute bottom-0 right-0 w-1.5 h-1.5 border-b border-r border-violet-500"></div>
+              <label className="mb-2 block text-[10px] font-bold uppercase tracking-[0.2em] text-violet-500">
+                &gt; Select_Glyph_Module
               </label>
               <select
                 name="glyphId"
-                className="w-full border border-violet-700/50 bg-black py-2 px-2 text-sm text-violet-100 outline-none focus:border-violet-400"
+                className="w-full border border-violet-700/50 bg-black py-2 px-2 text-sm text-violet-100 outline-none focus:border-violet-400 focus:shadow-uv-glow"
                 required
               >
-                <option value="">— Select —</option>
+                <option value="">[ NONE_SELECTED ]</option>
                 {glyphs.map((g) => (
                   <option key={g.id} value={g.id}>
                     {g.name}
@@ -151,9 +165,9 @@ export default function ChatPane({
             </div>
             <button
               type="submit"
-              className="w-full border border-violet-500/70 bg-violet-950/80 py-2 text-xs font-bold uppercase tracking-[0.2em] text-violet-100 hover:border-violet-400"
+              className="w-full border border-violet-500/70 bg-violet-950/80 py-2 text-[10px] font-bold uppercase tracking-[0.2em] text-violet-200 hover:border-violet-400 hover:bg-violet-900/60 transition-colors"
             >
-              Initialize
+              [ INITIALIZE_UPLINK ]
             </button>
           </form>
         </div>
@@ -165,7 +179,19 @@ export default function ChatPane({
     <div className="h-full min-h-0 w-full">
       <ChatThread
         chatId={chat.id}
+        activeTimelineEventId={activeTimelineEventId}
         onAppendToDocument={onAppendToDocument}
+        glyphId={chat.glyphId}
+        glyphs={glyphs}
+        projectId={activeProjectId}
+        onChangeGlyph={async (glyphId) => {
+          await fetch(`/api/chats/${chat.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ glyphId }),
+          });
+          setChat((prev) => (prev ? { ...prev, glyphId } : null));
+        }}
       />
     </div>
   );

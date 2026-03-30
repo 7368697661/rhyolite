@@ -1,5 +1,5 @@
-import { prisma } from "@/lib/prisma";
 import { z } from "zod";
+import { listWikiEntries, writeWikiEntry, generateId, type FsWikiEntry } from "@/lib/fs-db";
 
 export const dynamic = "force-dynamic";
 
@@ -21,10 +21,8 @@ export async function GET(req: Request) {
     });
   }
 
-  const entries = await prisma.wikiEntry.findMany({
-    where: { projectId },
-    orderBy: { title: "asc" },
-  });
+  const entries = await listWikiEntries(projectId);
+  entries.sort((a, b) => a.title.localeCompare(b.title));
   return Response.json(entries);
 }
 
@@ -38,8 +36,18 @@ export async function POST(req: Request) {
     });
   }
 
-  const entry = await prisma.wikiEntry.create({
-    data: parsed.data,
-  });
+  const projectId = parsed.data.projectId;
+  const entry: FsWikiEntry = {
+    id: generateId(),
+    projectId,
+    title: parsed.data.title,
+    content: parsed.data.content || "",
+    aliases: parsed.data.aliases || "",
+    folderId: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  await writeWikiEntry(entry);
   return Response.json(entry, { status: 201 });
 }

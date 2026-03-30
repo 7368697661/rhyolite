@@ -1,7 +1,7 @@
-import { prisma } from "@/lib/prisma";
 import { z } from "zod";
 import { streamGeminiText } from "@/lib/gemini";
 import { HarmBlockThreshold, HarmCategory } from "@google/genai";
+import { readProject, listWikiEntries } from "@/lib/fs-db";
 
 export const dynamic = "force-dynamic";
 
@@ -22,25 +22,23 @@ export async function POST(req: Request) {
 
   const { projectId, selectedText, fullContent, instruction } = parsed.data;
 
-  const project = await prisma.project.findUnique({
-    where: { id: projectId },
-    include: { wikiEntries: true },
-  });
-
+  const project = await readProject(projectId);
   if (!project) return new Response("Project not found", { status: 404 });
+
+  const wikiEntries = await listWikiEntries(projectId);
 
   let systemInstruction = `You are an AI co-writer. The user has selected a portion of text in their chapter. You will rewrite or infill the selected text based on the user's instruction.
 Return ONLY the replacement text. Do not include introductory phrases. Ensure the prose blends perfectly into the surrounding text.`;
 
-if(project.storyOutline){
-systemInstruction+= `\n\n---\nCHAPTER OUTLINE:\n${project.storyOutline}`;
-}
-if (project.loreBible) {
-systemInstruction += `\n\n---\nLORE BIBLE:\n${project.loreBible}`;
-}
-if (project.wikiEntries.length > 0) {
-systemInstruction += `\n\n---\nWIKI ENTRIES:\n`;
-    for (const w of project.wikiEntries) {
+  if(project.storyOutline){
+    systemInstruction+= `\n\n---\nCHAPTER OUTLINE:\n${project.storyOutline}`;
+  }
+  if (project.loreBible) {
+    systemInstruction += `\n\n---\nLORE BIBLE:\n${project.loreBible}`;
+  }
+  if (wikiEntries.length > 0) {
+    systemInstruction += `\n\n---\nWIKI ENTRIES:\n`;
+    for (const w of wikiEntries) {
       systemInstruction += `### ${w.title}\n${w.content}\n\n`;
     }
   }

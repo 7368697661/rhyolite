@@ -21,6 +21,15 @@ type ChatMessage = {
   parentMessageId: string | null;
 };
 
+type TokenBudget = {
+  canon: number;
+  wiki: number;
+  dag: number;
+  draft: number;
+  history: number;
+  total: number;
+};
+
 type AttachmentDraft = {
   id: string;
   filename: string;
@@ -107,7 +116,7 @@ const Markdown = React.memo(function Markdown({ content }: { content: string }) 
 });
 
 const messageBody =
-  "w-full whitespace-pre-wrap px-3 py-3 text-sm leading-relaxed text-violet-100/90 md:px-4";
+  "w-full whitespace-pre-wrap px-3 py-3 text-xs font-body leading-relaxed text-violet-100/90 md:px-4";
 
 const MessageRow = React.memo(function MessageRow({
   m,
@@ -118,6 +127,8 @@ const MessageRow = React.memo(function MessageRow({
   onRegenerate,
   onAppendToDocument,
   isStreaming,
+  chatId,
+  onMessagesMutated,
 }: {
   m: BranchMessage;
   isUser: boolean;
@@ -127,6 +138,8 @@ const MessageRow = React.memo(function MessageRow({
   onRegenerate: () => void;
   onAppendToDocument?: (text: string) => void;
   isStreaming: boolean;
+  chatId?: string;
+  onMessagesMutated?: () => void | Promise<void>;
 }) {
   return (
     <div className="flex flex-col">
@@ -144,6 +157,59 @@ const MessageRow = React.memo(function MessageRow({
           <Markdown content={m.content} />
         </div>
       </div>
+      {isUser && chatId ? (
+        <div className="flex flex-wrap gap-2 border-t border-violet-900/50 px-3 py-2 md:px-4">
+          <button
+            type="button"
+            disabled={isStreaming}
+            onClick={async () => {
+              const next = window.prompt("Edit message (branches from here reset):", m.content);
+              if (next == null || !next.trim()) return;
+              await fetch(`/api/chats/${chatId}/messages/${m.id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ content: next.trim() }),
+              });
+              await onMessagesMutated?.();
+            }}
+            className="border border-violet-800/70 bg-black px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-violet-400 hover:border-violet-600 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            disabled={isStreaming}
+            onClick={async () => {
+              if (!window.confirm("Delete this message and all replies under it?")) return;
+              await fetch(`/api/chats/${chatId}/messages/${m.id}`, {
+                method: "DELETE",
+              });
+              await onMessagesMutated?.();
+            }}
+            className="border border-red-900/60 bg-black px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-red-400/90 hover:border-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Del
+          </button>
+        </div>
+      ) : null}
+      {!isUser && chatId ? (
+        <div className="flex flex-wrap gap-2 border-t border-violet-900/50 px-3 py-2 md:px-4">
+          <button
+            type="button"
+            disabled={isStreaming}
+            onClick={async () => {
+              if (!window.confirm("Delete this AI message and all replies under it?")) return;
+              await fetch(`/api/chats/${chatId}/messages/${m.id}`, {
+                method: "DELETE",
+              });
+              await onMessagesMutated?.();
+            }}
+            className="border border-red-900/60 bg-black px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-red-400/90 hover:border-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Del
+          </button>
+        </div>
+      ) : null}
       {!isUser && prev?.role === "user" ? (
         <div className="border-t border-violet-900/50 px-3 py-2 md:px-4">
           {renderForkControls(prev.id, m.id)}
@@ -178,12 +244,30 @@ const MessageRow = React.memo(function MessageRow({
   );
 });
 
+type PromptTemplate = {
+  id: string;
+  projectId: string;
+  name: string;
+  template: string;
+  createdAt: string;
+};
+
 export default function ChatThread({
   chatId,
+  activeTimelineEventId,
   onAppendToDocument,
+  glyphId,
+  glyphs,
+  onChangeGlyph,
+  projectId,
 }: {
   chatId: string;
+  activeTimelineEventId?: string | null;
   onAppendToDocument?: (text: string) => void;
+  glyphId?: string;
+  glyphs?: { id: string; name: string }[];
+  onChangeGlyph?: (id: string) => void | Promise<void>;
+  projectId?: string | null;
 }) {
   const [allMessages, setAllMessages] = useState<ChatMessage[]>([]);
   const [activeTipMessageId, setActiveTipMessageId] = useState<string | null>(
@@ -200,6 +284,11 @@ export default function ChatThread({
   
   const [safetyPreset, setSafetyPreset] = useState<"none" | "low" | "medium" | "high">("none");
   const [estimatedTokens, setEstimatedTokens] = useState<number>(0);
+  const [tokenBudget, setTokenBudget] = useState<TokenBudget | null>(null);
+
+  const [promptTemplates, setPromptTemplates] = useState<PromptTemplate[]>([]);
+  const [showTemplateMenu, setShowTemplateMenu] = useState(false);
+  const templateMenuRef = useRef<HTMLDivElement | null>(null);
 
   // Simple token estimator: ~3.5 chars per token for english text
   useEffect(() => {
@@ -211,6 +300,25 @@ export default function ChatThread({
     // Add ~2000 chars overhead for base system prompt / draft context padding
     setEstimatedTokens(Math.ceil((totalChars + 2000) / 3.5));
   }, [allMessages, input]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    fetch(`/api/prompts?projectId=${projectId}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => setPromptTemplates(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!showTemplateMenu) return;
+    function handleClickOutside(e: MouseEvent) {
+      if (templateMenuRef.current && !templateMenuRef.current.contains(e.target as Node)) {
+        setShowTemplateMenu(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showTemplateMenu]);
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const [attachments, setAttachments] = useState<AttachmentDraft[]>([]);
@@ -454,6 +562,7 @@ export default function ChatThread({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           chatId,
+          activeTimelineEventId,
           message: trimmed,
           continuedFromModelMessageId: continuedFromModelMessageId ?? null,
           safetyPreset,
@@ -475,6 +584,7 @@ export default function ChatThread({
       const decoder = new TextDecoder();
 
       let modelText = "";
+      let metaParsed = false;
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
@@ -484,6 +594,23 @@ export default function ChatThread({
         if (!chunkText) continue;
 
         modelText += chunkText;
+
+        if (!metaParsed) {
+          const nlIdx = modelText.indexOf("\n");
+          if (nlIdx === -1) continue;
+          const firstLine = modelText.slice(0, nlIdx);
+          if (firstLine.startsWith('{"__meta":')) {
+            try {
+              const meta = JSON.parse(firstLine);
+              if (meta.__meta && meta.tokenBudget) {
+                setTokenBudget(meta.tokenBudget);
+              }
+            } catch { /* malformed meta */ }
+            modelText = modelText.slice(nlIdx + 1);
+          }
+          metaParsed = true;
+        }
+
         setStreamDraft(modelText);
       }
     } catch {
@@ -511,7 +638,7 @@ export default function ChatThread({
       const res = await fetch("/api/chat/regenerate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chatId, safetyPreset }),
+        body: JSON.stringify({ chatId, activeTimelineEventId, safetyPreset }),
         signal: controller.signal,
       });
 
@@ -523,6 +650,7 @@ export default function ChatThread({
       const decoder = new TextDecoder();
 
       let modelText = "";
+      let metaParsed = false;
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
@@ -532,6 +660,23 @@ export default function ChatThread({
         if (!chunkText) continue;
 
         modelText += chunkText;
+
+        if (!metaParsed) {
+          const nlIdx = modelText.indexOf("\n");
+          if (nlIdx === -1) continue;
+          const firstLine = modelText.slice(0, nlIdx);
+          if (firstLine.startsWith('{"__meta":')) {
+            try {
+              const meta = JSON.parse(firstLine);
+              if (meta.__meta && meta.tokenBudget) {
+                setTokenBudget(meta.tokenBudget);
+              }
+            } catch { /* malformed meta */ }
+            modelText = modelText.slice(nlIdx + 1);
+          }
+          metaParsed = true;
+        }
+
         setStreamDraft(modelText);
       }
     } catch {
@@ -604,14 +749,39 @@ export default function ChatThread({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="shrink-0 border-b border-violet-600/40 px-3 py-1.5 flex justify-between items-center">
-        <div>
-          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-violet-500">
-            Assistant
-          </span>
-          <span className="ml-2 text-[10px] text-violet-800">// comms</span>
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="shrink-0 text-[10px] font-bold text-violet-500">&gt;_</span>
+          {glyphs && glyphs.length > 0 && glyphId && onChangeGlyph ? (
+            <select
+              value={glyphId}
+              onChange={(e) => onChangeGlyph(e.target.value)}
+              className="max-w-[120px] truncate bg-transparent border border-violet-800/70 text-violet-300 text-[10px] uppercase tracking-wider outline-none p-0.5"
+            >
+              {glyphs.map((g) => (
+                <option key={g.id} value={g.id} className="bg-black">
+                  {g.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="text-[10px] text-violet-800">// comms</span>
+          )}
         </div>
-        <div className="text-[10px] uppercase tracking-wider text-violet-700" title="Estimated context token size">
-          ctx: ~{estimatedTokens.toLocaleString()}
+        <div className="group relative shrink-0 text-[9px] uppercase tracking-wider text-violet-700 font-mono cursor-default">
+          {tokenBudget ? (
+            <>
+              <span>CTX: ~{(tokenBudget.total / 1000).toFixed(1)}k</span>
+              <div className="pointer-events-none absolute right-0 top-full mt-1 z-50 hidden group-hover:block border border-violet-700/60 bg-black/95 px-2 py-1.5 text-[9px] text-violet-400 whitespace-nowrap shadow-lg">
+                CANON: {tokenBudget.canon.toLocaleString()} |{" "}
+                WIKI: {tokenBudget.wiki.toLocaleString()} |{" "}
+                DAG: {tokenBudget.dag.toLocaleString()} |{" "}
+                DRAFT: {tokenBudget.draft.toLocaleString()} |{" "}
+                HIST: {tokenBudget.history.toLocaleString()}
+              </div>
+            </>
+          ) : (
+            <span>ctx: ~{estimatedTokens.toLocaleString()}</span>
+          )}
         </div>
       </div>
 
@@ -621,9 +791,9 @@ export default function ChatThread({
         className="min-h-0 flex-1 overflow-y-auto"
       >
         {displayPath.length === 0 && !isStreaming ? (
-          <div className="border-b border-violet-900/50 px-3 py-4 text-xs uppercase tracking-wider text-violet-800">
-            No traffic — send to open channel.
-          </div>
+        <div className="border-b border-violet-900/50 px-3 py-4 text-[10px] uppercase tracking-wider text-violet-800 font-mono">
+          No traffic — send to open channel.
+        </div>
         ) : null}
 
         <div className="divide-y divide-violet-800/50">
@@ -643,6 +813,8 @@ export default function ChatThread({
                 onRegenerate={() => onRegenerate().catch(() => {})}
                 onAppendToDocument={onAppendToDocument}
                 isStreaming={isStreaming}
+                chatId={chatId}
+                onMessagesMutated={() => loadMessages().catch(() => {})}
               />
             );
           })}
@@ -682,22 +854,27 @@ export default function ChatThread({
             <label className="sr-only" htmlFor="chat-input">
               Message
             </label>
+            <div className="relative">
+              <div className="absolute left-3 top-2.5 text-violet-500 font-bold opacity-80 pointer-events-none">
+                &gt;
+              </div>
             <textarea
               id="chat-input"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               rows={2}
               onPaste={onPaste}
-              className="min-h-[44px] w-full resize-none border border-violet-700/50 bg-black px-3 py-2 text-sm text-violet-100 outline-none placeholder:text-violet-900 focus:border-violet-400 focus:shadow-uv-glow"
-              placeholder="Transmit…"
+              className="min-h-[44px] w-full resize-none border border-violet-700/50 bg-[#020005] py-2 pl-7 pr-3 text-xs font-body leading-relaxed text-violet-100 outline-none caret-violet-500 placeholder:text-violet-900 focus:border-violet-400 focus:shadow-uv-glow"
+              placeholder="_"
               disabled={isStreaming || isReadingAttachments}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  onSend().catch(() => {});
-                }
-              }}
-            />
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    onSend().catch(() => {});
+                  }
+                }}
+              />
+            </div>
 
             <div className="mt-2 flex items-center justify-between gap-2">
               <div className="flex min-w-0 items-center gap-2">
@@ -719,6 +896,83 @@ export default function ChatThread({
                   <option value="medium">Medium</option>
                   <option value="high">High</option>
                 </select>
+
+                {projectId && (
+                  <div className="relative" ref={templateMenuRef}>
+                    <button
+                      type="button"
+                      onClick={() => setShowTemplateMenu((v) => !v)}
+                      className="border border-violet-800/70 bg-black px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-400 hover:border-violet-600"
+                      title="Prompt templates"
+                    >
+                      /
+                    </button>
+                    {showTemplateMenu && (
+                      <div className="absolute bottom-full left-0 mb-1 z-50 w-56 max-h-52 overflow-y-auto border border-violet-700/60 bg-black shadow-lg">
+                        <div className="border-b border-violet-800/50 px-2 py-1.5 text-[9px] font-bold uppercase tracking-[0.2em] text-violet-600">
+                          Prompt Templates
+                        </div>
+                        {promptTemplates.length === 0 && (
+                          <div className="px-2 py-2 text-[10px] text-violet-700">
+                            No templates yet.
+                          </div>
+                        )}
+                        {promptTemplates.map((t) => (
+                          <div key={t.id} className="group flex items-center justify-between hover:bg-violet-950/50">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setInput(t.template);
+                                setShowTemplateMenu(false);
+                              }}
+                              className="flex-1 truncate px-2 py-1.5 text-left text-[10px] text-violet-300 hover:text-violet-100"
+                            >
+                              {t.name}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                await fetch(`/api/prompts/${t.id}`, { method: "DELETE" });
+                                setPromptTemplates((prev) => prev.filter((p) => p.id !== t.id));
+                              }}
+                              className="shrink-0 px-1.5 py-1 text-[10px] text-violet-800 opacity-0 group-hover:opacity-100 hover:text-red-400"
+                              title="Delete template"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                        <div className="border-t border-violet-800/50">
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const currentText = input.trim();
+                              if (!currentText) {
+                                alert("Type a prompt in the input field first, then save it as a template.");
+                                return;
+                              }
+                              const name = window.prompt("Template name:");
+                              if (!name?.trim()) return;
+                              const res = await fetch("/api/prompts", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ projectId, name: name.trim(), template: currentText }),
+                              });
+                              if (res.ok) {
+                                const newTpl = await res.json();
+                                setPromptTemplates((prev) => [...prev, newTpl]);
+                              }
+                              setShowTemplateMenu(false);
+                            }}
+                            className="w-full px-2 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wide text-emerald-500/80 hover:bg-emerald-950/30 hover:text-emerald-400"
+                          >
+                            [+] Save current as template
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 

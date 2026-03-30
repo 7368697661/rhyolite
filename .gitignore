@@ -1,7 +1,16 @@
 node_modules
-# Keep environment variables out of version control
-.env
 .next
 dev.db
 
+# Environment (contains API keys)
+.env
+
+# User project data
+.workspace/
+
+# Build artifacts
 /generated/prisma
+tsconfig.tsbuildinfo
+
+# OS junk
+.DS_Store

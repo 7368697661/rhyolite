@@ -1,4 +1,3 @@
-import { prisma } from "@/lib/prisma";
 import {
   extendTipFromModel,
   childrenByParent,
@@ -6,8 +5,16 @@ import {
   serializeBranchChoices,
   type BranchMessage,
 } from "@/lib/messageBranch";
-import { backfillLinearMessageParentsIfNeeded } from "@/lib/chatBackfill";
-import { getSafetySettings, streamGeminiText, type SafetyPreset } from "@/lib/gemini";
+import { type SafetyPreset } from "@/lib/gemini";
+import { streamModel } from "@/lib/providers";
+import {
+  buildTimelineDagRagFragment,
+  resolveChatProjectContext,
+} from "@/lib/timelineDagContext";
+import { retrieveSimilar } from "@/lib/embeddings";
+import { windowDraftContent } from "@/lib/draftWindowing";
+import { findChatScope } from "../chats/scope";
+import { getGlyph, writeChat, generateId, type FsChat, type FsChatMessage } from "@/lib/fs-db";
 
 export const dynamic = "force-dynamic";
 
@@ -16,9 +23,11 @@ type ChatMessageInput = {
   message: string;
   glyphId?: string;
   documentId?: string | null;
+  timelineId?: string | null;
+  activeTimelineEventId?: string | null;
   safetyPreset?: SafetyPreset;
-  /** Model message id this user message continues from (active branch). Omit for first message in chat. */
   continuedFromModelMessageId?: string | null;
+  cursorPosition?: number;
   attachments?: Array<{
     filename: string;
     mimeType: string;
@@ -27,17 +36,8 @@ type ChatMessageInput = {
   }>;
 };
 
-async function chainToRoot(chatId: string, messageId: string) {
-  const all = await prisma.chatMessage.findMany({
-    where: { chatId },
-    select: {
-      id: true,
-      role: true,
-      content: true,
-      parentMessageId: true,
-    },
-  });
-  const byId = new Map(all.map((m) => [m.id, m]));
+function chainToRoot(messages: FsChatMessage[], messageId: string) {
+  const byId = new Map(messages.map((m) => [m.id, m]));
   const chain: Array<{
     id: string;
     role: "user" | "model";
@@ -76,65 +76,31 @@ export async function POST(req: Request) {
 
   let chatId = body.chatId;
   let glyphId: string;
+  let chatScope: Awaited<ReturnType<typeof findChatScope>> = null;
 
   if (chatId) {
-    const chat = await prisma.chat.findUnique({
-      where: { id: chatId },
-      select: { id: true, glyphId: true },
-    });
-    if (!chat) {
+    chatScope = await findChatScope(chatId);
+    if (!chatScope) {
       return new Response(JSON.stringify({ error: "Chat not found." }), {
         status: 404,
         headers: { "Content-Type": "application/json" },
       });
     }
-    glyphId = chat.glyphId;
+    glyphId = chatScope.chat.glyphId;
   } else {
-    if (!body.glyphId) {
-      return new Response(
-        JSON.stringify({
-          error: "Creating a new chat requires 'glyphId'.",
-        }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
-    }
-    const title = body.message.trim().slice(0, 60) || "New chat";
-    const chat = await prisma.chat.create({
-      data: {
-        title,
-        glyphId: body.glyphId,
-        documentId: body.documentId,
-      },
-      select: { id: true, glyphId: true },
-    });
-    chatId = chat.id;
-    glyphId = chat.glyphId;
+    // Creating a new chat via the general endpoint isn't fully supported via FS without project context.
+    // The UI currently hits POST /api/chats to create it first, so this fallback is rare.
+    return new Response(JSON.stringify({ error: "Must provide chatId for FS mode." }), { status: 400 });
   }
 
-  await backfillLinearMessageParentsIfNeeded(chatId!);
-
-  const chatRow = await prisma.chat.findUnique({
-    where: { id: chatId! },
-    select: {
-      activeTipMessageId: true,
-      branchChoicesJson: true,
-      documentId: true,
-    },
-  });
-
+  const chat = chatScope!.chat;
   let parentForUser: string | null = null;
 
   if (
     body.continuedFromModelMessageId &&
     typeof body.continuedFromModelMessageId === "string"
   ) {
-    const cont = await prisma.chatMessage.findFirst({
-      where: {
-        id: body.continuedFromModelMessageId,
-        chatId: chatId!,
-        role: "model",
-      },
-    });
+    const cont = chat.messages.find(m => m.id === body.continuedFromModelMessageId && m.role === "model");
     if (!cont) {
       return new Response(
         JSON.stringify({ error: "Invalid continuedFromModelMessageId." }),
@@ -142,39 +108,31 @@ export async function POST(req: Request) {
       );
     }
     parentForUser = cont.id;
-  } else if (chatRow?.activeTipMessageId) {
-    const tip = await prisma.chatMessage.findUnique({
-      where: { id: chatRow.activeTipMessageId },
-    });
+  } else if (chat.activeTipMessageId) {
+    const tip = chat.messages.find(m => m.id === chat.activeTipMessageId);
     if (tip?.role === "model") {
       parentForUser = tip.id;
     } else if (tip?.role === "user") {
-      const models = await prisma.chatMessage.findMany({
-        where: {
-          chatId: chatId!,
-          parentMessageId: tip.id,
-          role: "model",
-        },
-        orderBy: { createdAt: "desc" },
-        take: 1,
-      });
+      const models = chat.messages.filter((m: any) => m.parentMessageId === tip.id && m.role === "model");
+      models.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       parentForUser = models[0]?.id ?? null;
     }
   }
 
-  const userMsg = await prisma.chatMessage.create({
-    data: {
-      chatId: chatId!,
-      role: "user",
-      content: `${body.message}${attachmentLabel}`,
-      parentMessageId: parentForUser,
-    },
-    select: { id: true },
-  });
+  const userMsg: FsChatMessage = {
+    id: generateId(),
+    chatId: chat.id,
+    role: "user",
+    content: `${body.message}${attachmentLabel}`,
+    parentMessageId: parentForUser,
+    createdAt: new Date().toISOString(),
+  };
 
-  const glyph = await prisma.glyph.findUnique({
-    where: { id: glyphId },
-  });
+  chat.messages.push(userMsg);
+  chat.updatedAt = new Date().toISOString();
+  await writeChat(chatScope!.projectId, chat);
+
+  const glyph = await getGlyph(glyphId);
   if (!glyph) {
     return new Response(JSON.stringify({ error: "Glyph not found." }), {
       status: 500,
@@ -182,56 +140,93 @@ export async function POST(req: Request) {
     });
   }
 
-  const chainToRootList = await chainToRoot(chatId!, userMsg.id);
+  const chainToRootList = chainToRoot(chat.messages, userMsg.id);
   
   let systemInstruction = glyph.systemInstruction;
   let ragContextText = "";
+  let wikiChars = 0;
+  let dagChars = 0;
+  let draftChars = 0;
 
-  if (chatRow?.documentId) {
-    const document = await prisma.document.findUnique({
-      where: { id: chatRow.documentId },
-      include: {
-        project: {
-          include: { wikiEntries: true },
-        },
-      },
+  const { project, document } = await resolveChatProjectContext({
+    documentId: chat.documentId ?? null,
+    timelineId: chat.timelineId ?? null,
+  });
+
+  if (project) {
+    const p = project;
+
+    if (p.loreBible) {
+      systemInstruction += `\n\n---\nCORE CANON / METAPHYSICS (ALWAYS ON):\n${p.loreBible}`;
+    }
+    if (p.storyOutline) {
+      systemInstruction += `\n\n---\nSTORY OUTLINE:\n${p.storyOutline}`;
+    }
+
+    if (body.activeTimelineEventId) {
+      const dagFragment = await buildTimelineDagRagFragment(
+        body.activeTimelineEventId
+      );
+      dagChars = dagFragment.length;
+      ragContextText += dagFragment;
+    }
+
+    const recentUserText = chainToRootList
+      .slice(-3)
+      .map((m) => m.content)
+      .join("\n")
+      .toLowerCase();
+    const draftText = document?.content
+      ? document.content.slice(-4000).toLowerCase()
+      : "";
+    const searchCorpus = recentUserText + "\n" + draftText;
+
+    const keywordMatched = new Set<string>();
+    const matchedWikis = p.wikiEntries.filter((w) => {
+      const title = w.title.toLowerCase();
+      const aliases = w.aliases
+        .toLowerCase()
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (searchCorpus.includes(title)) { keywordMatched.add(w.id); return true; }
+      for (const a of aliases) {
+        if (searchCorpus.includes(a)) { keywordMatched.add(w.id); return true; }
+      }
+      return false;
     });
 
-    if (document?.project) {
-      const p = document.project;
-      
-      if (p.loreBible) {
-        systemInstruction += `\n\n---\nCORE CANON / METAPHYSICS (ALWAYS ON):\n${p.loreBible}`;
-      }
-      if (p.storyOutline) {
-        systemInstruction += `\n\n---\nSTORY OUTLINE:\n${p.storyOutline}`;
-      }
-
-      // Keyword-based Wiki RAG
-      const recentUserText = chainToRootList.slice(-3).map(m => m.content).join("\n").toLowerCase();
-      const draftText = document.content ? document.content.slice(-4000).toLowerCase() : "";
-      const searchCorpus = recentUserText + "\n" + draftText;
-
-      const matchedWikis = p.wikiEntries.filter(w => {
-        const title = w.title.toLowerCase();
-        const aliases = w.aliases.toLowerCase().split(",").map(s => s.trim()).filter(Boolean);
-        if (searchCorpus.includes(title)) return true;
-        for (const a of aliases) {
-          if (searchCorpus.includes(a)) return true;
-        }
-        return false;
-      });
-
-      if (matchedWikis.length > 0) {
-        ragContextText += `[RETRIEVED WIKI ENTRIES (For Context)]\n`;
-        for (const entry of matchedWikis) {
-          ragContextText += `### ${entry.title}\n${entry.content}\n\n`;
+    try {
+      const embeddingQuery = chainToRootList.slice(-2).map((m) => m.content).join("\n");
+      const similar = await retrieveSimilar(p.id, embeddingQuery, 6);
+      for (const hit of similar) {
+        if (hit.type === "wiki" && !keywordMatched.has(hit.id)) {
+          const entry = p.wikiEntries.find((w) => w.id === hit.id);
+          if (entry) matchedWikis.push(entry);
         }
       }
+    } catch { /* embedding retrieval is optional */ }
 
-      if (document.content) {
-        ragContextText += `\n[CURRENT CHAPTER DRAFT]\n${document.content}\n\n(Note: The above is the current state of the chapter. Do not repeat it verbatim unless rewriting. Use it to inform your continuation.)\n`;
+    if (matchedWikis.length > 0) {
+      const wikiStart = ragContextText.length;
+      ragContextText += `[RETRIEVED WIKI ENTRIES (For Context)]\n`;
+      for (const entry of matchedWikis) {
+        ragContextText += `### ${entry.title}\n${entry.content}\n\n`;
       }
+      wikiChars = ragContextText.length - wikiStart;
+    }
+
+    if (document?.content) {
+      const { text: windowedDraft, isWindowed } = windowDraftContent(
+        document.content,
+        body.cursorPosition
+      );
+      const label = isWindowed
+        ? `\n[CURRENT CHAPTER DRAFT (windowed — cursor region highlighted)]\n`
+        : `\n[CURRENT CHAPTER DRAFT]\n`;
+      const draftSection = `${label}${windowedDraft}\n\n(Note: The above is the current state of the chapter. Do not repeat it verbatim unless rewriting. Use it to inform your continuation.)\n`;
+      draftChars = draftSection.length;
+      ragContextText += draftSection;
     }
   }
 
@@ -258,7 +253,6 @@ export async function POST(req: Request) {
     
     let text = m.content;
     
-    // Inject the RAG + Draft context ONLY into the final user message to save systemInstruction bloat
     if (isLatestUser && ragContextText) {
       text = `${ragContextText}\n---\n[NEW USER MESSAGE]\n${text}`;
     }
@@ -278,20 +272,47 @@ export async function POST(req: Request) {
   const encoder = new TextEncoder();
   const abortSignal = req.signal;
 
-  const deltas = await streamGeminiText({
+  const flatMessages = contents.map((c) => ({
+    role: c.role as "user" | "model",
+    content: c.parts.map((p: any) => p.text ?? "").join(""),
+  }));
+
+  const deltas = await streamModel({
+    provider: (glyph as any).provider ?? "gemini",
     model: glyph.model,
     systemInstruction,
-    contents,
+    messages: flatMessages,
     temperature: glyph.temperature,
     maxOutputTokens: glyph.maxOutputTokens,
     abortSignal,
-    safetySettings: getSafetySettings(body.safetyPreset ?? "none"),
+    safetyPreset: body.safetyPreset ?? "none",
   });
+
+  const tokenBudget = {
+    canon: Math.ceil(systemInstruction.length / 3.5),
+    wiki: Math.ceil(wikiChars / 3.5),
+    dag: Math.ceil(dagChars / 3.5),
+    draft: Math.ceil(draftChars / 3.5),
+    history: Math.ceil(
+      flatMessages.reduce((sum, m) => sum + m.content.length, 0) / 3.5
+    ),
+    total: 0,
+  };
+  tokenBudget.total =
+    tokenBudget.canon + tokenBudget.wiki + tokenBudget.dag +
+    tokenBudget.draft + tokenBudget.history;
 
   let fullText = "";
 
+  const projectId = chatScope!.projectId;
+
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
+      controller.enqueue(
+        encoder.encode(
+          JSON.stringify({ __meta: true, tokenBudget }) + "\n"
+        )
+      );
       try {
         for await (const delta of deltas) {
           if (!delta) continue;
@@ -306,41 +327,28 @@ export async function POST(req: Request) {
         try {
           const trimmed = fullText.trim();
           if (trimmed) {
-            const modelMsg = await prisma.chatMessage.create({
-              data: {
-                chatId: chatId!,
-                role: "model",
-                content: fullText,
-                parentMessageId: userMsg.id,
-              },
-              select: { id: true },
-            });
+            const modelMsg: FsChatMessage = {
+              id: generateId(),
+              chatId: chat.id,
+              role: "model",
+              content: fullText,
+              parentMessageId: userMsg.id,
+              createdAt: new Date().toISOString(),
+            };
 
-            const all = (await prisma.chatMessage.findMany({
-              where: { chatId: chatId! },
-              select: {
-                id: true,
-                role: true,
-                content: true,
-                createdAt: true,
-                parentMessageId: true,
-              },
-            })) as BranchMessage[];
+            chat.messages.push(modelMsg);
 
-            const choices = parseBranchChoices(
-              chatRow?.branchChoicesJson ?? "{}"
-            );
+            const all = chat.messages as BranchMessage[];
+            const choices = parseBranchChoices(chat.branchChoicesJson);
             choices[userMsg.id] = modelMsg.id;
             const kids = childrenByParent(all);
             const newTip = extendTipFromModel(modelMsg.id, kids, choices);
 
-            await prisma.chat.update({
-              where: { id: chatId! },
-              data: {
-                activeTipMessageId: newTip,
-                branchChoicesJson: serializeBranchChoices(choices),
-              },
-            });
+            chat.activeTipMessageId = newTip;
+            chat.branchChoicesJson = serializeBranchChoices(choices);
+            chat.updatedAt = new Date().toISOString();
+
+            await writeChat(projectId, chat);
           }
         } catch {
           // ignore persistence errors

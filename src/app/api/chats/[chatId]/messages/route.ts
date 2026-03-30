@@ -1,47 +1,28 @@
-import { prisma } from "@/lib/prisma";
-import { backfillLinearMessageParentsIfNeeded } from "@/lib/chatBackfill";
+import { findChatScope } from "../../scope";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(_req: Request, { params }: any) {
   const { chatId } = await params;
 
-  await backfillLinearMessageParentsIfNeeded(chatId);
+  const scope = await findChatScope(chatId);
 
-  const chat = await prisma.chat.findUnique({
-    where: { id: chatId },
-    select: {
-      id: true,
-      activeTipMessageId: true,
-      branchChoicesJson: true,
-    },
-  });
-
-  if (!chat) {
+  if (!scope) {
     return new Response(JSON.stringify({ error: "Chat not found." }), {
       status: 404,
       headers: { "Content-Type": "application/json" },
     });
   }
 
-  const messages = await prisma.chatMessage.findMany({
-    where: { chatId },
-    orderBy: { createdAt: "asc" },
-    select: {
-      id: true,
-      role: true,
-      content: true,
-      createdAt: true,
-      parentMessageId: true,
-    },
-  });
+  const { chat } = scope;
 
+  // No need to backfill, FS chats are fresh.
   return Response.json({
     chat: {
       id: chat.id,
       activeTipMessageId: chat.activeTipMessageId,
       branchChoicesJson: chat.branchChoicesJson,
     },
-    messages,
+    messages: chat.messages.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()),
   });
 }

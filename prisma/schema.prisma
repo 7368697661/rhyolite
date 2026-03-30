@@ -18,63 +18,66 @@ enum MessageRole {
 }
 
 model Glyph {
-  id                String   @id @default(cuid())
+  id                String @id @default(cuid())
   name              String
-  systemInstruction String   @default("")
-  model             String   @default("gemini-3.1-pro-preview")
-  temperature       Float    @default(0.7)
-  maxOutputTokens   Int      @default(2048)
+  systemInstruction String @default("")
+  model             String @default("gemini-3.1-pro-preview")
+  temperature       Float  @default(0.7)
+  maxOutputTokens   Int    @default(2048)
 
-  chats             Chat[]
+  chats Chat[]
 
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Chat {
-  id        String @id @default(cuid())
-  title     String
+  id    String @id @default(cuid())
+  title String
 
-  glyphId   String
+  glyphId            String
   /// Leaf message of the currently viewed branch (walk parents to build the visible thread).
   activeTipMessageId String?
   /// JSON map: userMessageId -> selected modelMessageId for each fork (optional; client can override).
-  branchChoicesJson  String @default("{}")
+  branchChoicesJson  String  @default("{}")
 
-  glyph     Glyph @relation(fields: [glyphId], references: [id], onDelete: Restrict)
-  
+  glyph Glyph @relation(fields: [glyphId], references: [id], onDelete: Restrict)
+
   documentId String?
   document   Document? @relation(fields: [documentId], references: [id], onDelete: SetNull)
 
-  messages  ChatMessage[]
+  timelineId String?
+  timeline   Timeline? @relation(fields: [timelineId], references: [id], onDelete: SetNull)
+
+  messages ChatMessage[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
 model ChatMessage {
-  id        String @id @default(cuid())
-  chatId    String
-  role      MessageRole
-  content   String
-  createdAt DateTime @default(now())
+  id              String        @id @default(cuid())
+  chatId          String
+  role            MessageRole
+  content         String
+  createdAt       DateTime      @default(now())
   /// Previous message in this branch: user continues a model; model answers a user; alternates share the same parent user.
   parentMessageId String?
   parent          ChatMessage?  @relation("MessageBranch", fields: [parentMessageId], references: [id], onDelete: SetNull)
   children        ChatMessage[] @relation("MessageBranch")
 
-  chat      Chat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  chat Chat @relation(fields: [chatId], references: [id], onDelete: Cascade)
 
   @@index([chatId, createdAt])
   @@index([parentMessageId])
 }
 
 model ProjectFolder {
-  id        String   @id @default(cuid())
+  id        String  @id @default(cuid())
   name      String
-  type      String   // "document" or "wiki"
+  type      String // "document" or "wiki"
   projectId String
-  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   documents   Document[]
   wikiEntries WikiEntry[]
@@ -93,41 +96,96 @@ model Project {
   documents    Document[]
   wikiEntries  WikiEntry[]
   folders      ProjectFolder[]
+  timelines    Timeline[]
 
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Document {
-  id          String   @id @default(cuid())
-  title       String
-  content     String   @default("")
-  orderIndex  Float    @default(0)
+  id         String @id @default(cuid())
+  title      String
+  content    String @default("")
+  orderIndex Float  @default(0)
 
-  projectId   String
-  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  folderId    String?
-  folder      ProjectFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  folderId String?
+  folder   ProjectFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
 
-  chats       Chat[]
+  chats          Chat[]
+  timelineEvents TimelineEvent[]
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model WikiEntry {
-  id          String   @id @default(cuid())
-  title       String
-  content     String   @default("")
-  aliases     String   @default("")
+  id      String @id @default(cuid())
+  title   String
+  content String @default("")
+  aliases String @default("")
 
-  projectId   String
-  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  folderId    String?
-  folder      ProjectFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  folderId String?
+  folder   ProjectFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  timelineEvents TimelineEvent[] @relation("TimelineTags")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Timeline {
+  id    String @id @default(cuid())
+  title String
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  events TimelineEvent[]
+  chats  Chat[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model TimelineEvent {
+  id      String  @id @default(cuid())
+  title   String
+  summary String?
+  content String?
+
+  color         String?
+  referenceType String?
+  referenceId   String?
+
+  // Position in the React Flow canvas
+  positionX Float @default(0)
+  positionY Float @default(0)
+
+  timelineId String?
+  timeline   Timeline? @relation(fields: [timelineId], references: [id], onDelete: Cascade)
+
+  // Keep this temporarily for backward compatibility / migration script
+  documentId String?
+  document   Document? @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  nextEvents EventEdge[] @relation("SourceEvents")
+  prevEvents EventEdge[] @relation("TargetEvents")
+
+  tags WikiEntry[] @relation("TimelineTags")
+}
+
+model EventEdge {
+  id       String        @id @default(cuid())
+  sourceId String
+  targetId String
+  source   TimelineEvent @relation("SourceEvents", fields: [sourceId], references: [id], onDelete: Cascade)
+  target   TimelineEvent @relation("TargetEvents", fields: [targetId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId, targetId])
 }
