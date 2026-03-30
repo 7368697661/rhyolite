@@ -1,9 +1,8 @@
-<p align="center">
-  <code>&gt;_ RHYOLITE//</code>
-</p>
+
+<img width="1640" height="664" alt="rhyolite_logo" src="https://github.com/user-attachments/assets/24cc99b4-92b8-4c2a-b80f-e4f2744e65d5" />
 
 <p align="center">
-  <strong>Terminal-grade creative + research environment with multi-provider LLMs, DAG reasoning, and hybrid RAG.</strong>
+  <strong>Terminal-inspired creative + research environment with multi-provider LLMs, DAG reasoning, and hybrid RAG.</strong>
 </p>
 
 <p align="center">
@@ -365,7 +364,7 @@ graph TB
 | Persistence | `fs/promises` + `gray-matter` (YAML frontmatter Markdown) |
 | Search | Custom full-text scoring + Gemini `text-embedding-004` embeddings |
 | Validation | `zod` |
-| Fonts | Monaspace Neon (body), Cormorant Garamond, Fraunces (headings) |
+| Fonts | Monaspace Neon (body), Cormorant Garamond (fallback), Fraunces (italics), Nightingale (headings) |
 
 ---
 
