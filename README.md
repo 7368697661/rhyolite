@@ -5,15 +5,36 @@
   <strong>Terminal-inspired creative + research environment with multi-provider LLMs, DAG reasoning, and hybrid RAG.</strong>
 </p>
 
-<p align="center">
-  <a href="https://github.com/7368697661/rhyolite"><img alt="GitHub Repo" src="https://img.shields.io/badge/github-7368697661%2Frhyolite-violet?style=flat-square&logo=github" /></a>
-  <img alt="License" src="https://img.shields.io/badge/license-BSL_1.1-blueviolet?style=flat-square" />
-  <img alt="Next.js" src="https://img.shields.io/badge/Next.js-15-black?style=flat-square&logo=nextdotjs" />
-  <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=white" />
-  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat-square&logo=typescript&logoColor=white" />
-  <img alt="Tailwind" src="https://img.shields.io/badge/Tailwind_CSS-4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white" />
-  <img alt="Storage" src="https://img.shields.io/badge/storage-local_filesystem-555?style=flat-square" />
-</p>
+### What it is
+- Local-first, single-user writing and research IDE with an integrated multi-provider LLM assistant
+- Terminal/hacker aesthetic UI (3-pane layout: file tree, editor, chat) — no cloud, no database, all files on disk as Markdown and JSON
+- Built for managing complex, multi-threaded narratives and structured reasoning chains alongside AI
+
+### What it does
+- **Markdown authoring** with split-pane live preview, internal `[entity]` linking with hover previews, styled callouts, AI diff highlighting, and inline infill (select text, instruct the model to rewrite)
+- **DAG reasoning canvas** — each timeline is a directed acyclic graph (`reactflow`) where nodes are typed (Event, Scene, Hypothesis, Evidence, etc.) and edges are labeled with semantic relationships ("Supports", "Contradicts", "Implements")
+- **Hybrid RAG context assembly** — every chat prompt is backed by five context sources: always-on core canon (system instruction), keyword RAG (title/alias substring match), embedding RAG (cosine similarity via `text-embedding-004` vectors), graph traversal RAG (BFS up to 10 hops upstream through DAG edges), and cursor-aware smart windowing (sends relevant chunks of large documents instead of truncating)
+- **Auto-synthesis** — click a button on any DAG node and the engine traverses all upstream dependencies, collects content + edge semantics, and prompts the LLM to generate a synthesized conclusion
+- **Multi-provider LLM streaming** — Gemini, any OpenAI-compatible endpoint (local models, Together, etc.), and Anthropic, all behind a unified provider abstraction with per-persona configuration (model, temperature, max tokens, system prompt)
+- **Branching chat** — full message tree with fork/backtrack navigation, edit/delete on any message, regenerate with branch history persisted to disk
+- **Global network map** — `d3-force` physics-based graph of all documents, wiki entries, and timeline events with edges derived from content links, DAG relationships, entity references, and tags
+- **Full-text search** via `Cmd+K` command palette, auto entity link suggestions, manuscript export (full project or per-folder), version history (auto-snapshots on save), saved prompt templates
+
+### How it's used
+- Write chapters ("Crystals") and wiki entries ("Artifacts") in the editor; populate artifacts with characters, locations, systems — their titles/aliases are what the RAG retrieves
+- Build DAG timelines to map plot structure, cause-and-effect chains, or technical argument trees — drag documents/wiki into the graph as reference nodes
+- Chat is bound per-crystal or per-timeline; focusing a DAG node scopes the LLM's context to that node's upstream chain
+- No `@mention` syntax — retrieval is implicit via title matching and semantic similarity
+
+### Tech
+- Next.js 15 (App Router) + React 19, TypeScript 5.x
+- `reactflow` v11 + `d3-force` for canvas and network graph
+- Tailwind CSS, Monaspace Neon font (ligatures + texture healing)
+- `fs/promises` + `gray-matter` (YAML frontmatter Markdown) — zero-database persistence
+- `@google/genai` (Gemini), OpenAI-compatible REST, `@anthropic-ai/sdk` (Anthropic)
+- Gemini `text-embedding-004` for vector embeddings, custom full-text scoring for search
+- `zod` for API validation, `react-markdown` + `remark-gfm` for rendering
+- BSL 1.1 licensed (non-production free, converts to Apache 2.0 in 2030)
 
 ---
 
@@ -57,17 +78,19 @@ Everything runs on your machine. Projects are plain Markdown and JSON files on d
 
 ### 1. Terminal Interface
 
-| Pane | Role |
-|------|------|
-| **Sidebar** (`DIR`) | Project tree: `CRYSTAL_DB` (chapters w/ folders), `ARTIFACTS` (wiki), `TIMELINES` (DAG canvases). Drag-and-drop reordering, per-folder `[EXP]` export. System section at bottom: settings, glyphs, manuscript export. |
-| **Editor** (`EDIT`) | Split-pane Markdown editor + live preview. Debounced rendering (dynamic delay by word count). AI diff highlighting on appended content. Inline entity link suggestions with navigate / insert actions. Infill on selections. |
-| **Comms** (`COMMS`) | Streaming chat bound to a crystal or timeline. Branch navigation (fork/backtrack). Compact token budget display (`CTX: ~20.6k`, hover for full breakdown). Edit/delete messages. Saved prompt templates (`/`). Safety presets. |
-| **Global Network Map** | `d3-force` + `reactflow` physics graph of all entities. Click to preview, open, or explore relationships. |
-| **Command Palette** | `Cmd+K` full-text search across crystals, artifacts, and timeline events. Focus trap, ARIA dialog semantics. |
+
+| Pane                   | Role                                                                                                                                                                                                                           |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Sidebar** (`DIR`)    | Project tree: `CRYSTAL_DB` (chapters w/ folders), `ARTIFACTS` (wiki), `TIMELINES` (DAG canvases). Drag-and-drop reordering, per-folder `[EXP]` export. System section at bottom: settings, glyphs, manuscript export.          |
+| **Editor** (`EDIT`)    | Split-pane Markdown editor + live preview. Debounced rendering (dynamic delay by word count). AI diff highlighting on appended content. Inline entity link suggestions with navigate / insert actions. Infill on selections.   |
+| **Comms** (`COMMS`)    | Streaming chat bound to a crystal or timeline. Branch navigation (fork/backtrack). Compact token budget display (`CTX: ~20.6k`, hover for full breakdown). Edit/delete messages. Saved prompt templates (`/`). Safety presets. |
+| **Global Network Map** | `d3-force` + `reactflow` physics graph of all entities. Click to preview, open, or explore relationships.                                                                                                                      |
+| **Command Palette**    | `Cmd+K` full-text search across crystals, artifacts, and timeline events. Focus trap, ARIA dialog semantics.                                                                                                                   |
+
 
 - **Keyboard shortcuts**: `Cmd+K` search, `Cmd+1` focus editor, `Cmd+2` focus comms
 - **Inline forms**: All create/rename/delete actions use terminal-styled inline prompts (no browser dialogs)
-- **Styling**: Ultraviolet color scheme, Monaspace Neon body font with ligatures, CRT crosshair overlays, `tailwindcss-animate` transitions
+- **Styling**: Ultraviolet color scheme, Monaspace Neon body font with ligatures, CRT crosshair overlays, custom CSS animations
 
 ### 2. DAG Reasoning Engine
 
@@ -75,10 +98,12 @@ Each **Timeline** is an independent DAG canvas (`reactflow`). Nodes and edges ar
 
 **Node types** (categorical):
 
-| Category | Types |
-|----------|-------|
-| Narrative | `Event`, `Scene`, `Lore` |
+
+| Category  | Types                                  |
+| --------- | -------------------------------------- |
+| Narrative | `Event`, `Scene`, `Lore`               |
 | Technical | `Hypothesis`, `Evidence`, `Conclusion` |
+
 
 **Key capabilities**:
 
@@ -93,13 +118,15 @@ Each **Timeline** is an independent DAG canvas (`reactflow`). Nodes and edges ar
 
 When a chat message is sent, the context engine assembles a prompt from five sources:
 
-| Source | Method | Scope |
-|--------|--------|-------|
-| **Core Canon** | Always injected | `loreBible` + `storyOutline` from project settings → system instruction |
-| **Keyword RAG** | Title/alias substring matching | Scans recent user messages + active document tail against all artifact titles and aliases |
-| **Embedding RAG** | Cosine similarity via `text-embedding-004` | Stored in `embeddings.json` per project; combined with keyword results for hybrid recall |
-| **Graph Traversal RAG** | BFS backward from focused DAG node | Depth ≤ 10 hops. Full content for active node, summaries (or full if `passFullContent`) for ancestors, edge semantics included |
-| **Smart Context Windowing** | Cursor-position-based chunking | For documents > 800 words: sends first 200 words + ~400 words around cursor + last 200 words instead of full content |
+
+| Source                      | Method                                     | Scope                                                                                                                          |
+| --------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| **Core Canon**              | Always injected                            | `loreBible` + `storyOutline` from project settings → system instruction                                                        |
+| **Keyword RAG**             | Title/alias substring matching             | Scans recent user messages + active document tail against all artifact titles and aliases                                      |
+| **Embedding RAG**           | Cosine similarity via `text-embedding-004` | Stored in `embeddings.json` per project; combined with keyword results for hybrid recall                                       |
+| **Graph Traversal RAG**     | BFS backward from focused DAG node         | Depth ≤ 10 hops. Full content for active node, summaries (or full if `passFullContent`) for ancestors, edge semantics included |
+| **Smart Context Windowing** | Cursor-position-based chunking             | For documents > 800 words: sends first 200 words + ~400 words around cursor + last 200 words instead of full content           |
+
 
 Token budget is computed during assembly and streamed to the client as a `__meta` JSON frame before the first content token.
 
@@ -107,11 +134,13 @@ Token budget is computed during assembly and streamed to the client as a `__meta
 
 Each **Glyph** (AI persona) specifies provider, model, temperature, max tokens, and system instructions.
 
-| Provider | Config | Notes |
-|----------|--------|-------|
-| **Gemini** | `GEMINI_API_KEY` | Default. Uses `@google/genai` SDK. Embedding via `text-embedding-004`. |
-| **OpenAI-compatible** | `OPENAI_API_KEY` + `OPENAI_BASE_URL` | Any OpenAI-API-compatible endpoint (local models, Together, etc.) |
-| **Anthropic** | `ANTHROPIC_API_KEY` | Claude models via Anthropic SDK |
+
+| Provider              | Config                               | Notes                                                                  |
+| --------------------- | ------------------------------------ | ---------------------------------------------------------------------- |
+| **Gemini**            | `GEMINI_API_KEY`                     | Default. Uses `@google/genai` SDK. Embedding via `text-embedding-004`. |
+| **OpenAI-compatible** | `OPENAI_API_KEY` + `OPENAI_BASE_URL` | Any OpenAI-API-compatible endpoint (local models, Together, etc.)      |
+| **Anthropic**         | `ANTHROPIC_API_KEY`                  | Claude models via Anthropic SDK                                        |
+
 
 Provider abstraction lives in `src/lib/providers.ts`. Streaming is handled uniformly regardless of backend.
 
@@ -191,23 +220,27 @@ There is no `@mention` syntax. The model sees artifacts whose **titles or aliase
 
 ### Markdown Features
 
-| Syntax | Behavior |
-|--------|----------|
-| `[Title]` | Resolves to internal crystal/artifact link (navigable, with hover preview) |
-| `[[Title]]` | Same, alternative syntax |
-| `[Title](<TitleOrId>)` | Explicit link with custom display text |
-| `> [!quote] ...` | Renders as styled callout, hides the `[!quote]` marker |
+
+| Syntax                 | Behavior                                                                   |
+| ---------------------- | -------------------------------------------------------------------------- |
+| `[Title]`              | Resolves to internal crystal/artifact link (navigable, with hover preview) |
+| `[[Title]]`            | Same, alternative syntax                                                   |
+| `[Title](<TitleOrId>)` | Explicit link with custom display text                                     |
+| `> [!quote] ...`       | Renders as styled callout, hides the `[!quote]` marker                     |
+
 
 ### Global Network Map
 
 Open from the top bar (`[ GLOBAL_NETWORK ]`). Shows all entities as a physics-based graph.
 
-| Edge Color | Relationship |
-|------------|-------------|
-| **Pink** | Content links (bracket references between documents) |
-| **Violet** | Timeline DAG edges |
-| **Amber** | Event → Crystal/Artifact references |
-| **Teal** | Event → Artifact tag connections |
+
+| Edge Color | Relationship                                         |
+| ---------- | ---------------------------------------------------- |
+| **Pink**   | Content links (bracket references between documents) |
+| **Violet** | Timeline DAG edges                                   |
+| **Amber**  | Event → Crystal/Artifact references                  |
+| **Teal**   | Event → Artifact tag connections                     |
+
 
 Click a node to preview. Click empty space to deselect.
 
@@ -241,6 +274,8 @@ erDiagram
   Chat ||--o{ ChatMessage : "messages"
   ChatMessage ||--o| ChatMessage : "branch (parent)"
 ```
+
+
 
 ---
 
@@ -349,22 +384,26 @@ graph TB
   SB -->|drag crystal/artifact| DAG
 ```
 
+
+
 ---
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| Framework | Next.js 15 (App Router) + React 19 |
-| Language | TypeScript 5.x |
-| Styling | Tailwind CSS + `tailwindcss-animate` |
-| Canvas | `reactflow` v11, `d3-force` |
-| Markdown | `react-markdown` + `remark-gfm` |
-| AI | `@google/genai`, OpenAI-compatible REST, `@anthropic-ai/sdk` |
-| Persistence | `fs/promises` + `gray-matter` (YAML frontmatter Markdown) |
-| Search | Custom full-text scoring + Gemini `text-embedding-004` embeddings |
-| Validation | `zod` |
-| Fonts | Monaspace Neon (body), Cormorant Garamond (fallback), Fraunces (italics), Nightingale (headings) |
+
+| Layer       | Technology                                                                                       |
+| ----------- | ------------------------------------------------------------------------------------------------ |
+| Framework   | Next.js 15 (App Router) + React 19                                                               |
+| Language    | TypeScript 5.x                                                                                   |
+| Styling     | Tailwind CSS + custom keyframe animations                                                        |
+| Canvas      | `reactflow` v11, `d3-force`                                                                      |
+| Markdown    | `react-markdown` + `remark-gfm`                                                                  |
+| AI          | `@google/genai`, OpenAI-compatible REST, `@anthropic-ai/sdk`                                     |
+| Persistence | `fs/promises` + `gray-matter` (YAML frontmatter Markdown)                                        |
+| Search      | Custom full-text scoring + Gemini `text-embedding-004` embeddings                                |
+| Validation  | `zod`                                                                                            |
+| Fonts       | Monaspace Neon (body), Cormorant Garamond (fallback), Fraunces (italics), Nightingale (headings) |
+
 
 ---
 
