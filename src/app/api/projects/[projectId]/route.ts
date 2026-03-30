@@ -14,7 +14,7 @@ const ProjectUpdateSchema = z.object({
 export async function GET(req: Request, { params }: any) {
   const { projectId } = await params;
   const project = await readProject(projectId);
-  if (!project) return new Response(null, { status: 404 });
+  if (!project) return Response.json({ error: "Not found" }, { status: 404 });
   return Response.json({ ...project, name: project.title });
 }
 
@@ -23,14 +23,11 @@ export async function PUT(req: Request, { params }: any) {
   const json = await req.json().catch(() => null);
   const parsed = ProjectUpdateSchema.safeParse(json);
   if (!parsed.success) {
-    return new Response(JSON.stringify({ error: "Invalid payload", details: parsed.error }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+    return Response.json({ error: "Invalid payload", details: parsed.error }, { status: 400 });
   }
 
   const project = await readProject(projectId);
-  if (!project) return new Response(null, { status: 404 });
+  if (!project) return Response.json({ error: "Not found" }, { status: 404 });
 
   if (parsed.data.name !== undefined) project.title = parsed.data.name;
   if (parsed.data.storyOutline !== undefined) project.storyOutline = parsed.data.storyOutline;
@@ -46,8 +43,8 @@ export async function DELETE(req: Request, { params }: any) {
   try {
     const pDir = await getProjectDir(projectId);
     await fs.rm(pDir, { recursive: true, force: true });
-  } catch (e) {
-    // ignore
+    return new Response(null, { status: 204 });
+  } catch (err: any) {
+    return Response.json({ error: err.message || "Failed to delete project" }, { status: 500 });
   }
-  return new Response(null, { status: 204 });
 }

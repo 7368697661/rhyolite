@@ -1,6 +1,7 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { sharedMarkdownComponents } from "./markdownComponents";
 
 export type EntityPreviewData = { title: string; snippet: string } | null;
 
@@ -34,14 +35,28 @@ function EntityLinkButton({
     setPreview(null);
   }, []);
 
+  const onFocus = useCallback(() => {
+    if (!resolveEntityPreview) return;
+    const data = resolveEntityPreview(title);
+    setPreview(data);
+    setHover(true);
+  }, [resolveEntityPreview, title]);
+
+  const onBlur = useCallback(() => {
+    setHover(false);
+    setPreview(null);
+  }, []);
+
   return (
     <span className="relative inline-block">
       <button
         type="button"
-        className="text-violet-400 underline decoration-violet-400/30 hover:text-violet-300 hover:decoration-violet-400"
+        className="text-violet-400 underline decoration-violet-400/30 hover:text-violet-300 hover:decoration-violet-400 focus:text-violet-300 focus:decoration-violet-400"
         onClick={onClick}
         onMouseEnter={onEnter}
         onMouseLeave={onLeave}
+        onFocus={onFocus}
+        onBlur={onBlur}
       >
         {children}
       </button>
@@ -66,25 +81,18 @@ export function WikiMarkdown({
 }) {
   const toEntityHref = (title: string) => `#entity:${encodeURIComponent(title)}`;
 
-  // Pre-process internal-link syntaxes so ReactMarkdown parses them as links.
-  // Supported:
-  // - [[Title]]                     -> [Title](#entity:Title)
-  // - [Title]                      -> [Title](#entity:Title) (clickable)
-  // - [Title](<TitleOrId>)        -> [Title](#entity:TitleOrId)
-  const processedContent = content
-    // Legacy double-bracket form.
-    .replace(/\[\[(.*?)\]\]/g, (m, title) => `[${title}](#entity:${encodeURIComponent(title)})`)
-    // Autolink-ish form: [X](<Y>)
-    .replace(/\]\(\s*<([^>]+)>\s*\)/g, (m, inner) => `](#entity:${encodeURIComponent(inner)})`)
-    // Bare bracket form: [Something] (only when NOT already a normal markdown link or image).
-    // Avoid callout markers [!quote], checkboxes [x]/[ ], single-char refs, and ![img]()
-    .replace(/(?<!!)\[([^\]]{2,})\](?!\()/g, (m, inner) => {
-      const t = String(inner).trim();
-      if (!t) return m;
-      if (t.startsWith("!")) return m;
-      if (/^[x ]$/i.test(t)) return m;
-      return `[${inner}](#entity:${encodeURIComponent(t)})`;
-    });
+  const processedContent = useMemo(() => {
+    return content
+      .replace(/\[\[(.*?)\]\]/g, (m, title) => `[${title}](#entity:${encodeURIComponent(title)})`)
+      .replace(/\]\(\s*<([^>]+)>\s*\)/g, (m, inner) => `](#entity:${encodeURIComponent(inner)})`)
+      .replace(/(?<!!)\[([^\]]{2,})\](?!\()/g, (m, inner) => {
+        const t = String(inner).trim();
+        if (!t) return m;
+        if (t.startsWith("!")) return m;
+        if (/^[x ]$/i.test(t)) return m;
+        return `[${inner}](#entity:${encodeURIComponent(t)})`;
+      });
+  }, [content]);
 
   function textFromNode(node: any): string {
     if (typeof node === "string") return node;
@@ -125,6 +133,7 @@ export function WikiMarkdown({
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       components={{
+        ...sharedMarkdownComponents,
         a: ({ href, children, ...props }) => {
           if (href?.startsWith("#entity:") || href?.startsWith("#wiki:")) {
             const prefix = href.startsWith("#entity:") ? "#entity:" : "#wiki:";
@@ -151,12 +160,6 @@ export function WikiMarkdown({
             </a>
           );
         },
-        p: ({ children }) => <p className="mb-4 leading-relaxed">{children}</p>,
-        h1: ({ children }) => <h1 className="text-3xl font-heading font-bold mb-4 mt-8">{children}</h1>,
-        h2: ({ children }) => <h2 className="text-2xl font-heading font-semibold mb-3 mt-6">{children}</h2>,
-        h3: ({ children }) => <h3 className="text-xl font-heading font-medium mb-2 mt-4">{children}</h3>,
-        ul: ({ children }) => <ul className="list-disc pl-6 mb-4 space-y-1">{children}</ul>,
-        ol: ({ children }) => <ol className="list-decimal pl-6 mb-4 space-y-1">{children}</ol>,
         blockquote: ({ children }) => {
           const calloutType = extractCalloutType(children);
           if (calloutType) {

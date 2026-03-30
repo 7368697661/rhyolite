@@ -3,6 +3,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { sharedMarkdownComponents } from "./markdownComponents";
+import TerminalPrompt, { TerminalConfirm } from "./TerminalPrompt";
 import {
   chainFromTip,
   childrenByParent,
@@ -77,38 +79,59 @@ function PaperclipIcon() {
   );
 }
 
+function TokenBudgetDisplay({ budget, estimate }: { budget: TokenBudget | null; estimate: number }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+
+  const handleEnter = () => {
+    if (ref.current) {
+      const r = ref.current.getBoundingClientRect();
+      setPos({ x: r.right, y: r.bottom + 4 });
+    }
+    setOpen(true);
+  };
+
+  return (
+    <div
+      ref={ref}
+      className="shrink-0 text-[9px] uppercase tracking-wider text-violet-700 font-mono cursor-default"
+      onMouseEnter={handleEnter}
+      onMouseLeave={() => setOpen(false)}
+    >
+      {budget ? (
+        <span>CTX: ~{(budget.total / 1000).toFixed(1)}k</span>
+      ) : (
+        <span>ctx: ~{estimate.toLocaleString()}</span>
+      )}
+      {open && (
+        <div
+          className="fixed z-[9999] border border-violet-700/60 bg-black/95 px-3 py-2 text-[9px] font-mono text-violet-400 whitespace-nowrap shadow-lg"
+          style={pos ? { top: pos.y, right: window.innerWidth - pos.x } : undefined}
+        >
+          {budget ? (
+            <div className="flex flex-col gap-0.5">
+              <span>CANON: <span className="text-violet-300">{budget.canon.toLocaleString()}</span></span>
+              <span>WIKI: <span className="text-violet-300">{budget.wiki.toLocaleString()}</span></span>
+              <span>DAG: <span className="text-violet-300">{budget.dag.toLocaleString()}</span></span>
+              <span>DRAFT: <span className="text-violet-300">{budget.draft.toLocaleString()}</span></span>
+              <span>HIST: <span className="text-violet-300">{budget.history.toLocaleString()}</span></span>
+              <span className="border-t border-violet-800/50 pt-0.5 mt-0.5 text-violet-200">TOTAL: {budget.total.toLocaleString()}</span>
+            </div>
+          ) : (
+            <span>Estimated ~{estimate.toLocaleString()} tokens</span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const Markdown = React.memo(function Markdown({ content }: { content: string }) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
-      components={{
-        a: ({ children, ...props }) => (
-          <a
-            {...props}
-            target="_blank"
-            rel="noreferrer"
-            className="underline underline-offset-2 opacity-90 hover:opacity-100"
-          >
-            {children}
-          </a>
-        ),
-        code: ({ className, children }) => {
-          const isInline = !className;
-          return isInline ? (
-            <code className="border border-violet-800/60 bg-violet-950/40 px-1 py-0.5 text-[0.9em] text-violet-200">
-              {children}
-            </code>
-          ) : (
-            <code className="block overflow-x-auto border border-violet-700/40 bg-black p-3 text-[0.9em] text-violet-100/90">
-              {children}
-            </code>
-          );
-        },
-        pre: ({ children }) => <pre className="my-2">{children}</pre>,
-        ul: ({ children }) => <ul className="list-disc pl-5">{children}</ul>,
-        ol: ({ children }) => <ol className="list-decimal pl-5">{children}</ol>,
-        p: ({ children }) => <p className="my-1.5">{children}</p>,
-      }}
+      components={sharedMarkdownComponents}
     >
       {content}
     </ReactMarkdown>
@@ -141,6 +164,9 @@ const MessageRow = React.memo(function MessageRow({
   chatId?: string;
   onMessagesMutated?: () => void | Promise<void>;
 }) {
+  const [editOpen, setEditOpen] = useState(false);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+
   return (
     <div className="flex flex-col">
       <div className={messageBody}>
@@ -158,57 +184,89 @@ const MessageRow = React.memo(function MessageRow({
         </div>
       </div>
       {isUser && chatId ? (
-        <div className="flex flex-wrap gap-2 border-t border-violet-900/50 px-3 py-2 md:px-4">
-          <button
-            type="button"
-            disabled={isStreaming}
-            onClick={async () => {
-              const next = window.prompt("Edit message (branches from here reset):", m.content);
-              if (next == null || !next.trim()) return;
-              await fetch(`/api/chats/${chatId}/messages/${m.id}`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ content: next.trim() }),
-              });
-              await onMessagesMutated?.();
-            }}
-            className="border border-violet-800/70 bg-black px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-violet-400 hover:border-violet-600 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Edit
-          </button>
-          <button
-            type="button"
-            disabled={isStreaming}
-            onClick={async () => {
-              if (!window.confirm("Delete this message and all replies under it?")) return;
-              await fetch(`/api/chats/${chatId}/messages/${m.id}`, {
-                method: "DELETE",
-              });
-              await onMessagesMutated?.();
-            }}
-            className="border border-red-900/60 bg-black px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-red-400/90 hover:border-red-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Del
-          </button>
-        </div>
+        <>
+          {editOpen ? (
+            <div className="border-t border-violet-900/50 px-3 py-2 md:px-4">
+              <TerminalPrompt
+                label="Edit message"
+                defaultValue={m.content}
+                onSubmit={async (next) => {
+                  await fetch(`/api/chats/${chatId}/messages/${m.id}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ content: next }),
+                  });
+                  setEditOpen(false);
+                  await onMessagesMutated?.();
+                }}
+                onCancel={() => setEditOpen(false)}
+              />
+            </div>
+          ) : confirmDeleteOpen ? (
+            <div className="border-t border-violet-900/50 px-3 py-2 md:px-4">
+              <TerminalConfirm
+                message="Delete this message and all replies under it?"
+                onConfirm={async () => {
+                  await fetch(`/api/chats/${chatId}/messages/${m.id}`, {
+                    method: "DELETE",
+                  });
+                  setConfirmDeleteOpen(false);
+                  await onMessagesMutated?.();
+                }}
+                onCancel={() => setConfirmDeleteOpen(false)}
+              />
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2 border-t border-violet-900/50 px-3 py-2 md:px-4">
+              <button
+                type="button"
+                disabled={isStreaming}
+                onClick={() => setEditOpen(true)}
+                className="border border-violet-800/70 bg-black px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-violet-400 hover:border-violet-600 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Edit
+              </button>
+              <button
+                type="button"
+                disabled={isStreaming}
+                onClick={() => setConfirmDeleteOpen(true)}
+                className="border border-red-900/60 bg-black px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-red-400/90 hover:border-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Del
+              </button>
+            </div>
+          )}
+        </>
       ) : null}
       {!isUser && chatId ? (
-        <div className="flex flex-wrap gap-2 border-t border-violet-900/50 px-3 py-2 md:px-4">
-          <button
-            type="button"
-            disabled={isStreaming}
-            onClick={async () => {
-              if (!window.confirm("Delete this AI message and all replies under it?")) return;
-              await fetch(`/api/chats/${chatId}/messages/${m.id}`, {
-                method: "DELETE",
-              });
-              await onMessagesMutated?.();
-            }}
-            className="border border-red-900/60 bg-black px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-red-400/90 hover:border-red-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Del
-          </button>
-        </div>
+        <>
+          {confirmDeleteOpen ? (
+            <div className="border-t border-violet-900/50 px-3 py-2 md:px-4">
+              <TerminalConfirm
+                message="Delete this AI message and all replies under it?"
+                onConfirm={async () => {
+                  await fetch(`/api/chats/${chatId}/messages/${m.id}`, {
+                    method: "DELETE",
+                  });
+                  setConfirmDeleteOpen(false);
+                  await onMessagesMutated?.();
+                }}
+                onCancel={() => setConfirmDeleteOpen(false)}
+              />
+            </div>
+          ) : (
+            <div className="flex flex-wrap gap-2 border-t border-violet-900/50 px-3 py-2 md:px-4">
+              <button
+                type="button"
+                disabled={isStreaming}
+                onClick={() => setConfirmDeleteOpen(true)}
+                className="border border-red-900/60 bg-black px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-red-400/90 hover:border-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Del
+              </button>
+            </div>
+          )}
+        </>
       ) : null}
       {!isUser && prev?.role === "user" ? (
         <div className="border-t border-violet-900/50 px-3 py-2 md:px-4">
@@ -260,6 +318,7 @@ export default function ChatThread({
   glyphs,
   onChangeGlyph,
   projectId,
+  cursorPosition,
 }: {
   chatId: string;
   activeTimelineEventId?: string | null;
@@ -268,6 +327,7 @@ export default function ChatThread({
   glyphs?: { id: string; name: string }[];
   onChangeGlyph?: (id: string) => void | Promise<void>;
   projectId?: string | null;
+  cursorPosition?: number;
 }) {
   const [allMessages, setAllMessages] = useState<ChatMessage[]>([]);
   const [activeTipMessageId, setActiveTipMessageId] = useState<string | null>(
@@ -288,6 +348,7 @@ export default function ChatThread({
 
   const [promptTemplates, setPromptTemplates] = useState<PromptTemplate[]>([]);
   const [showTemplateMenu, setShowTemplateMenu] = useState(false);
+  const [templateNamePromptOpen, setTemplateNamePromptOpen] = useState(false);
   const templateMenuRef = useRef<HTMLDivElement | null>(null);
 
   // Simple token estimator: ~3.5 chars per token for english text
@@ -566,6 +627,7 @@ export default function ChatThread({
           message: trimmed,
           continuedFromModelMessageId: continuedFromModelMessageId ?? null,
           safetyPreset,
+          cursorPosition,
           attachments: snapshotAttachments.map((a) => ({
             filename: a.filename,
             mimeType: a.mimeType,
@@ -624,7 +686,7 @@ export default function ChatThread({
     }
   }
 
-  async function onRegenerate() {
+  const handleRegenerate = useCallback(async () => {
     if (isStreaming || !lastUserOnPath) return;
 
     setIsStreaming(true);
@@ -688,13 +750,13 @@ export default function ChatThread({
       setStreamDraft("");
       await loadMessages().catch(() => {});
     }
-  }
+  }, [isStreaming, lastUserOnPath, chatId, activeTimelineEventId, safetyPreset, loadMessages]);
 
   function onStop() {
     abortControllerRef.current?.abort();
   }
 
-  function renderForkControls(userMsgId: string, currentModelId: string) {
+  const renderForkControls = useCallback((userMsgId: string, currentModelId: string) => {
     const siblings = siblingModelsForUser(userMsgId, childrenMap);
     if (siblings.length <= 1) return null;
 
@@ -738,7 +800,11 @@ export default function ChatThread({
         </button>
       </div>
     );
-  }
+  }, [branchChoices, childrenMap, allMessages, chatId, loadMessages]);
+
+  const handleMessagesMutated = useCallback(() => {
+    loadMessages().catch(() => {});
+  }, [loadMessages]);
 
   const showRegenOnLastModel =
     lastModelOnPath &&
@@ -767,22 +833,7 @@ export default function ChatThread({
             <span className="text-[10px] text-violet-800">// comms</span>
           )}
         </div>
-        <div className="group relative shrink-0 text-[9px] uppercase tracking-wider text-violet-700 font-mono cursor-default">
-          {tokenBudget ? (
-            <>
-              <span>CTX: ~{(tokenBudget.total / 1000).toFixed(1)}k</span>
-              <div className="pointer-events-none absolute right-0 top-full mt-1 z-50 hidden group-hover:block border border-violet-700/60 bg-black/95 px-2 py-1.5 text-[9px] text-violet-400 whitespace-nowrap shadow-lg">
-                CANON: {tokenBudget.canon.toLocaleString()} |{" "}
-                WIKI: {tokenBudget.wiki.toLocaleString()} |{" "}
-                DAG: {tokenBudget.dag.toLocaleString()} |{" "}
-                DRAFT: {tokenBudget.draft.toLocaleString()} |{" "}
-                HIST: {tokenBudget.history.toLocaleString()}
-              </div>
-            </>
-          ) : (
-            <span>ctx: ~{estimatedTokens.toLocaleString()}</span>
-          )}
-        </div>
+        <TokenBudgetDisplay budget={tokenBudget} estimate={estimatedTokens} />
       </div>
 
       <div
@@ -810,11 +861,11 @@ export default function ChatThread({
                 prev={prev}
                 renderForkControls={renderForkControls}
                 showRegen={!!isLastModel}
-                onRegenerate={() => onRegenerate().catch(() => {})}
+                onRegenerate={handleRegenerate}
                 onAppendToDocument={onAppendToDocument}
                 isStreaming={isStreaming}
                 chatId={chatId}
-                onMessagesMutated={() => loadMessages().catch(() => {})}
+                onMessagesMutated={handleMessagesMutated}
               />
             );
           })}
@@ -943,31 +994,44 @@ export default function ChatThread({
                           </div>
                         ))}
                         <div className="border-t border-violet-800/50">
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              const currentText = input.trim();
-                              if (!currentText) {
-                                alert("Type a prompt in the input field first, then save it as a template.");
-                                return;
-                              }
-                              const name = window.prompt("Template name:");
-                              if (!name?.trim()) return;
-                              const res = await fetch("/api/prompts", {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ projectId, name: name.trim(), template: currentText }),
-                              });
-                              if (res.ok) {
-                                const newTpl = await res.json();
-                                setPromptTemplates((prev) => [...prev, newTpl]);
-                              }
-                              setShowTemplateMenu(false);
-                            }}
-                            className="w-full px-2 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wide text-emerald-500/80 hover:bg-emerald-950/30 hover:text-emerald-400"
-                          >
-                            [+] Save current as template
-                          </button>
+                          {templateNamePromptOpen ? (
+                            <div className="px-1 py-1">
+                              <TerminalPrompt
+                                label="Template name"
+                                onSubmit={async (name) => {
+                                  const currentText = input.trim();
+                                  if (!currentText) return;
+                                  const res = await fetch("/api/prompts", {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ projectId, name, template: currentText }),
+                                  });
+                                  if (res.ok) {
+                                    const newTpl = await res.json();
+                                    setPromptTemplates((prev) => [...prev, newTpl]);
+                                  }
+                                  setTemplateNamePromptOpen(false);
+                                  setShowTemplateMenu(false);
+                                }}
+                                onCancel={() => setTemplateNamePromptOpen(false)}
+                              />
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const currentText = input.trim();
+                                if (!currentText) {
+                                  alert("Type a prompt in the input field first, then save it as a template.");
+                                  return;
+                                }
+                                setTemplateNamePromptOpen(true);
+                              }}
+                              className="w-full px-2 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wide text-emerald-500/80 hover:bg-emerald-950/30 hover:text-emerald-400"
+                            >
+                              [+] Save current as template
+                            </button>
+                          )}
                         </div>
                       </div>
                     )}

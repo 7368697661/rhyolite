@@ -60,12 +60,12 @@ function chainToRoot(messages: FsChatMessage[], messageId: string) {
 }
 
 export async function POST(req: Request) {
-  const body = (await req.json()) as ChatMessageInput;
-  if (!body?.message || typeof body.message !== "string") {
-    return new Response(JSON.stringify({ error: "Missing 'message'." }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+  const body = await req.json().catch(() => null) as ChatMessageInput | null;
+  if (!body) {
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+  if (!body.message || typeof body.message !== "string") {
+    return Response.json({ error: "Missing 'message'." }, { status: 400 });
   }
 
   const attachments = Array.isArray(body.attachments) ? body.attachments : [];
@@ -81,16 +81,13 @@ export async function POST(req: Request) {
   if (chatId) {
     chatScope = await findChatScope(chatId);
     if (!chatScope) {
-      return new Response(JSON.stringify({ error: "Chat not found." }), {
-        status: 404,
-        headers: { "Content-Type": "application/json" },
-      });
+      return Response.json({ error: "Chat not found." }, { status: 404 });
     }
     glyphId = chatScope.chat.glyphId;
   } else {
     // Creating a new chat via the general endpoint isn't fully supported via FS without project context.
     // The UI currently hits POST /api/chats to create it first, so this fallback is rare.
-    return new Response(JSON.stringify({ error: "Must provide chatId for FS mode." }), { status: 400 });
+    return Response.json({ error: "Must provide chatId for FS mode." }, { status: 400 });
   }
 
   const chat = chatScope!.chat;
@@ -102,10 +99,7 @@ export async function POST(req: Request) {
   ) {
     const cont = chat.messages.find(m => m.id === body.continuedFromModelMessageId && m.role === "model");
     if (!cont) {
-      return new Response(
-        JSON.stringify({ error: "Invalid continuedFromModelMessageId." }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
+      return Response.json({ error: "Invalid continuedFromModelMessageId." }, { status: 400 });
     }
     parentForUser = cont.id;
   } else if (chat.activeTipMessageId) {
@@ -134,10 +128,7 @@ export async function POST(req: Request) {
 
   const glyph = await getGlyph(glyphId);
   if (!glyph) {
-    return new Response(JSON.stringify({ error: "Glyph not found." }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
+    return Response.json({ error: "Glyph not found." }, { status: 500 });
   }
 
   const chainToRootList = chainToRoot(chat.messages, userMsg.id);

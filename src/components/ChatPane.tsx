@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import ChatThread from "./ChatThread";
 import type { ActiveItem } from "./WorkspaceClient";
 
@@ -11,15 +11,18 @@ export default function ChatPane({
   activeProjectId,
   activeTimelineEventId,
   onAppendToDocument,
+  cursorPosition,
 }: {
   activeItem: ActiveItem | null;
   activeProjectId: string | null;
   activeTimelineEventId?: string | null;
   onAppendToDocument: (text: string) => void | Promise<void>;
+  cursorPosition?: number;
 }) {
   const [chat, setChat] = useState<ChatPreview | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [glyphs, setGlyphs] = useState<{ id: string; name: string }[]>([]);
+  const seqRef = useRef(0);
 
   useEffect(() => {
     fetch("/api/glyphs")
@@ -28,10 +31,12 @@ export default function ChatPane({
   }, []);
 
   const loadChat = async (kind: "document" | "timeline", id: string) => {
+    const seq = ++seqRef.current;
     setIsLoading(true);
     const q =
       kind === "document" ? `documentId=${id}` : `timelineId=${id}`;
     const res = await fetch(`/api/chats?${q}`);
+    if (seq !== seqRef.current) return;
     if (res.ok) {
       const chats = await res.json();
       if (chats.length > 0) {
@@ -126,7 +131,7 @@ export default function ChatPane({
 
   if (!chat) {
     const ctxLabel =
-      activeItem.type === "timeline" ? "timeline DAG" : "chapter";
+      activeItem.type === "timeline" ? "timeline DAG" : "crystal";
     return (
       <div className="flex h-full min-h-0 flex-col border-t border-violet-900/50">
         <div className="border-b border-violet-600/40 px-3 py-2 bg-[#020005]">
@@ -184,6 +189,7 @@ export default function ChatPane({
         glyphId={chat.glyphId}
         glyphs={glyphs}
         projectId={activeProjectId}
+        cursorPosition={cursorPosition}
         onChangeGlyph={async (glyphId) => {
           await fetch(`/api/chats/${chat.id}`, {
             method: "PATCH",

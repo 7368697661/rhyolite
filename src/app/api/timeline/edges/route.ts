@@ -22,6 +22,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Scope not found for sourceId" }, { status: 404 });
     }
 
+    const eventIds = new Set(scope.data.events.map((e) => e.id));
+    if (!eventIds.has(data.sourceId) || !eventIds.has(data.targetId)) {
+      return NextResponse.json({ error: "Source or target node not found in timeline" }, { status: 400 });
+    }
+
     const edge: FsEventEdge = {
       id: generateId(),
       sourceId: data.sourceId,

@@ -27,38 +27,29 @@ type RegenerateInput = {
 };
 
 export async function POST(req: Request) {
-  const body = (await req.json()) as RegenerateInput;
-  if (!body?.chatId || typeof body.chatId !== "string") {
-    return new Response(JSON.stringify({ error: "Missing 'chatId'." }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+  const body = await req.json().catch(() => null) as RegenerateInput | null;
+  if (!body) {
+    return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+  if (!body.chatId || typeof body.chatId !== "string") {
+    return Response.json({ error: "Missing 'chatId'." }, { status: 400 });
   }
 
   const scope = await findChatScope(body.chatId);
 
   if (!scope) {
-    return new Response(JSON.stringify({ error: "Chat not found." }), {
-      status: 404,
-      headers: { "Content-Type": "application/json" },
-    });
+    return Response.json({ error: "Chat not found." }, { status: 404 });
   }
 
   const { chat, projectId } = scope;
 
   if (!chat.activeTipMessageId) {
-    return new Response(JSON.stringify({ error: "No active thread tip." }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+    return Response.json({ error: "No active thread tip." }, { status: 400 });
   }
 
   const glyph = await getGlyph(chat.glyphId);
   if (!glyph) {
-    return new Response(JSON.stringify({ error: "Glyph missing." }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
+    return Response.json({ error: "Glyph missing." }, { status: 500 });
   }
 
   const all = chat.messages as BranchMessage[];
@@ -74,10 +65,7 @@ export async function POST(req: Request) {
   }
 
   if (lastUserIdx === -1) {
-    return new Response(JSON.stringify({ error: "No user message found." }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+    return Response.json({ error: "No user message found." }, { status: 400 });
   }
 
   const promptChain = chain.slice(0, lastUserIdx + 1);

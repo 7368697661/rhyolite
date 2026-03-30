@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import Link from "next/link";
+import TerminalPrompt, { TerminalConfirm } from "./TerminalPrompt";
 import type {
   Project,
   Document,
@@ -8,6 +9,19 @@ import type {
   Folder,
   Timeline,
 } from "./WorkspaceClient";
+
+type InlinePromptState = {
+  action: string;
+  label: string;
+  defaultValue?: string;
+  targetId?: string;
+} | null;
+
+type InlineConfirmState = {
+  action: string;
+  message: string;
+  targetId: string;
+} | null;
 
 export default function ProjectSidebar({
   projects,
@@ -41,6 +55,37 @@ export default function ProjectSidebar({
     type: "document" | "wiki";
     folderId: string;
   } | null>(null);
+  const [inlinePrompt, setInlinePrompt] = useState<InlinePromptState>(null);
+  const [inlineConfirm, setInlineConfirm] = useState<InlineConfirmState>(null);
+
+  const documentFolders = useMemo(
+    () => folders.filter(f => f.type === "document"),
+    [folders],
+  );
+  const wikiFolders = useMemo(
+    () => folders.filter(f => f.type === "wiki"),
+    [folders],
+  );
+  const documentsByFolder = useMemo(() => {
+    const map = new Map<string | null, Document[]>();
+    for (const d of documents) {
+      const key = d.folderId ?? null;
+      const arr = map.get(key);
+      if (arr) arr.push(d);
+      else map.set(key, [d]);
+    }
+    return map;
+  }, [documents]);
+  const wikiEntriesByFolder = useMemo(() => {
+    const map = new Map<string | null, WikiEntry[]>();
+    for (const w of wikiEntries) {
+      const key = w.folderId ?? null;
+      const arr = map.get(key);
+      if (arr) arr.push(w);
+      else map.set(key, [w]);
+    }
+    return map;
+  }, [wikiEntries]);
 
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,51 +102,96 @@ export default function ProjectSidebar({
     }
   };
 
-  const handleCreateDocument = async () => {
-    if (!activeProjectId) return;
-    const title = prompt("Document title:");
-    if (!title) return;
-    await fetch("/api/documents", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, projectId: activeProjectId }),
-    });
+  const handleInlinePromptSubmit = async (value: string) => {
+    if (!inlinePrompt || !activeProjectId) return;
+    const { action, targetId } = inlinePrompt;
+
+    switch (action) {
+      case "new-doc":
+        await fetch("/api/documents", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: value, projectId: activeProjectId }),
+        });
+        break;
+      case "new-wiki":
+        await fetch("/api/wiki", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: value, projectId: activeProjectId }),
+        });
+        break;
+      case "new-timeline":
+        await fetch("/api/timelines", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title: value, projectId: activeProjectId }),
+        });
+        break;
+      case "new-folder-doc":
+        await fetch("/api/folders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: value, type: "document", projectId: activeProjectId }),
+        });
+        break;
+      case "new-folder-wiki":
+        await fetch("/api/folders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: value, type: "wiki", projectId: activeProjectId }),
+        });
+        break;
+      case "rename-doc":
+        if (targetId) {
+          await fetch(`/api/documents/${targetId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title: value }),
+          });
+        }
+        break;
+      case "rename-wiki":
+        if (targetId) {
+          await fetch(`/api/wiki/${targetId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title: value }),
+          });
+        }
+        break;
+      case "rename-timeline":
+        if (targetId) {
+          await fetch(`/api/timelines/${targetId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ title: value }),
+          });
+        }
+        break;
+    }
+
+    setInlinePrompt(null);
     onReloadProjectData();
   };
 
-  const handleCreateWiki = async () => {
-    if (!activeProjectId) return;
-    const title = prompt("Wiki entry title:");
-    if (!title) return;
-    await fetch("/api/wiki", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, projectId: activeProjectId }),
-    });
-    onReloadProjectData();
-  };
+  const handleInlineConfirm = async () => {
+    if (!inlineConfirm) return;
+    const { action, targetId } = inlineConfirm;
 
-  const handleCreateTimeline = async () => {
-    if (!activeProjectId) return;
-    const title = prompt("Timeline title:");
-    if (!title) return;
-    await fetch("/api/timelines", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, projectId: activeProjectId }),
-    });
-    onReloadProjectData();
-  };
+    switch (action) {
+      case "delete-doc":
+        await fetch(`/api/documents/${targetId}`, { method: "DELETE" });
+        break;
+      case "delete-wiki":
+        await fetch(`/api/wiki/${targetId}`, { method: "DELETE" });
+        break;
+      case "delete-timeline":
+        await fetch(`/api/timelines/${targetId}`, { method: "DELETE" });
+        break;
+    }
 
-  const handleCreateFolder = async (type: "document" | "wiki") => {
-    if (!activeProjectId) return;
-    const name = prompt("Folder name:");
-    if (!name) return;
-    await fetch("/api/folders", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, type, projectId: activeProjectId }),
-    });
+    setInlineConfirm(null);
     onReloadProjectData();
   };
 
@@ -117,7 +207,6 @@ export default function ProjectSidebar({
 
   const onDragStart = (e: React.DragEvent, type: "document" | "wiki", id: string, title: string) => {
     e.dataTransfer.setData("application/json", JSON.stringify({ type, id, title }));
-    // A little cyberpunk visual trick on drag
     if (e.target instanceof HTMLElement) {
       e.target.style.opacity = "0.5";
     }
@@ -156,6 +245,34 @@ export default function ProjectSidebar({
 
   const renderDocumentItem = (doc: Document, depth: number = 0) => {
     const isActive = activeItem?.type === "document" && activeItem.id === doc.id;
+    const isRenaming = inlinePrompt?.action === "rename-doc" && inlinePrompt.targetId === doc.id;
+    const isDeleting = inlineConfirm?.action === "delete-doc" && inlineConfirm.targetId === doc.id;
+
+    if (isRenaming) {
+      return (
+        <div key={doc.id} className={`border-b border-violet-900/40 ${depth > 0 ? "pl-4" : ""}`}>
+          <TerminalPrompt
+            label="Rename crystal"
+            defaultValue={doc.title}
+            onSubmit={handleInlinePromptSubmit}
+            onCancel={() => setInlinePrompt(null)}
+          />
+        </div>
+      );
+    }
+
+    if (isDeleting) {
+      return (
+        <div key={doc.id} className={`border-b border-violet-900/40 ${depth > 0 ? "pl-4" : ""}`}>
+          <TerminalConfirm
+            message={`Delete crystal "${doc.title}"?`}
+            onConfirm={handleInlineConfirm}
+            onCancel={() => setInlineConfirm(null)}
+          />
+        </div>
+      );
+    }
+
     return (
       <div
         key={doc.id}
@@ -176,12 +293,9 @@ export default function ProjectSidebar({
           <span className="truncate flex-1">{doc.title}</span>
         </button>
         <button
-          onClick={async (e) => {
+          onClick={(e) => {
             e.stopPropagation();
-            if (confirm(`Delete document "${doc.title}"?`)) {
-              await fetch(`/api/documents/${doc.id}`, { method: "DELETE" });
-              onReloadProjectData();
-            }
+            setInlineConfirm({ action: "delete-doc", message: `Delete crystal "${doc.title}"?`, targetId: doc.id });
           }}
           className="absolute right-8 top-1/2 -translate-y-1/2 opacity-0 group-hover/item:opacity-100 hover:text-red-400 transition-opacity p-1 text-[8px] font-bold tracking-widest text-violet-600"
           title="Delete"
@@ -189,17 +303,9 @@ export default function ProjectSidebar({
           [DEL]
         </button>
         <button
-          onClick={async (e) => {
+          onClick={(e) => {
             e.stopPropagation();
-            const newTitle = prompt("Rename document:", doc.title);
-            if (newTitle && newTitle !== doc.title) {
-              await fetch(`/api/documents/${doc.id}`, {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ title: newTitle }),
-              });
-              onReloadProjectData();
-            }
+            setInlinePrompt({ action: "rename-doc", label: "Rename crystal", defaultValue: doc.title, targetId: doc.id });
           }}
           className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover/item:opacity-100 hover:text-violet-300 transition-opacity p-1"
           title="Rename"
@@ -214,6 +320,34 @@ export default function ProjectSidebar({
 
   const renderWikiItem = (wiki: WikiEntry, depth: number = 0) => {
     const isActive = activeItem?.type === "wiki" && activeItem.id === wiki.id;
+    const isRenaming = inlinePrompt?.action === "rename-wiki" && inlinePrompt.targetId === wiki.id;
+    const isDeleting = inlineConfirm?.action === "delete-wiki" && inlineConfirm.targetId === wiki.id;
+
+    if (isRenaming) {
+      return (
+        <div key={wiki.id} className={`border-b border-violet-900/40 ${depth > 0 ? "pl-4" : ""}`}>
+          <TerminalPrompt
+            label="Rename artifact"
+            defaultValue={wiki.title}
+            onSubmit={handleInlinePromptSubmit}
+            onCancel={() => setInlinePrompt(null)}
+          />
+        </div>
+      );
+    }
+
+    if (isDeleting) {
+      return (
+        <div key={wiki.id} className={`border-b border-violet-900/40 ${depth > 0 ? "pl-4" : ""}`}>
+          <TerminalConfirm
+            message={`Delete artifact "${wiki.title}"?`}
+            onConfirm={handleInlineConfirm}
+            onCancel={() => setInlineConfirm(null)}
+          />
+        </div>
+      );
+    }
+
     return (
       <div
         key={wiki.id}
@@ -234,12 +368,9 @@ export default function ProjectSidebar({
           <span className="truncate flex-1">{wiki.title}</span>
         </button>
         <button
-          onClick={async (e) => {
+          onClick={(e) => {
             e.stopPropagation();
-            if (confirm(`Delete artifact "${wiki.title}"?`)) {
-              await fetch(`/api/wiki/${wiki.id}`, { method: "DELETE" });
-              onReloadProjectData();
-            }
+            setInlineConfirm({ action: "delete-wiki", message: `Delete artifact "${wiki.title}"?`, targetId: wiki.id });
           }}
           className="absolute right-8 top-1/2 -translate-y-1/2 opacity-0 group-hover/item:opacity-100 hover:text-red-400 transition-opacity p-1 text-[8px] font-bold tracking-widest text-violet-600"
           title="Delete"
@@ -247,17 +378,9 @@ export default function ProjectSidebar({
           [DEL]
         </button>
         <button
-          onClick={async (e) => {
+          onClick={(e) => {
             e.stopPropagation();
-            const newTitle = prompt("Rename wiki entry:", wiki.title);
-            if (newTitle && newTitle !== wiki.title) {
-              await fetch(`/api/wiki/${wiki.id}`, {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ title: newTitle }),
-              });
-              onReloadProjectData();
-            }
+            setInlinePrompt({ action: "rename-wiki", label: "Rename artifact", defaultValue: wiki.title, targetId: wiki.id });
           }}
           className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover/item:opacity-100 hover:text-violet-300 transition-opacity p-1"
           title="Rename"
@@ -272,6 +395,34 @@ export default function ProjectSidebar({
 
   const renderTimelineItem = (timeline: Timeline) => {
     const isActive = activeItem?.type === "timeline" && activeItem.id === timeline.id;
+    const isRenaming = inlinePrompt?.action === "rename-timeline" && inlinePrompt.targetId === timeline.id;
+    const isDeleting = inlineConfirm?.action === "delete-timeline" && inlineConfirm.targetId === timeline.id;
+
+    if (isRenaming) {
+      return (
+        <div key={timeline.id} className="border-b border-violet-900/40">
+          <TerminalPrompt
+            label="Rename timeline"
+            defaultValue={timeline.title}
+            onSubmit={handleInlinePromptSubmit}
+            onCancel={() => setInlinePrompt(null)}
+          />
+        </div>
+      );
+    }
+
+    if (isDeleting) {
+      return (
+        <div key={timeline.id} className="border-b border-violet-900/40">
+          <TerminalConfirm
+            message={`Delete timeline "${timeline.title}"?`}
+            onConfirm={handleInlineConfirm}
+            onCancel={() => setInlineConfirm(null)}
+          />
+        </div>
+      );
+    }
+
     return (
       <div
         key={timeline.id}
@@ -289,12 +440,9 @@ export default function ProjectSidebar({
           <span className="truncate flex-1">{timeline.title}</span>
         </button>
         <button
-          onClick={async (e) => {
+          onClick={(e) => {
             e.stopPropagation();
-            if (confirm(`Delete timeline "${timeline.title}"?`)) {
-              await fetch(`/api/timelines/${timeline.id}`, { method: "DELETE" });
-              onReloadProjectData();
-            }
+            setInlineConfirm({ action: "delete-timeline", message: `Delete timeline "${timeline.title}"?`, targetId: timeline.id });
           }}
           className="absolute right-8 top-1/2 -translate-y-1/2 opacity-0 group-hover/item:opacity-100 hover:text-red-400 transition-opacity p-1 text-[8px] font-bold tracking-widest text-violet-600"
           title="Delete"
@@ -302,17 +450,9 @@ export default function ProjectSidebar({
           [DEL]
         </button>
         <button
-          onClick={async (e) => {
+          onClick={(e) => {
             e.stopPropagation();
-            const newTitle = prompt("Rename timeline:", timeline.title);
-            if (newTitle && newTitle !== timeline.title) {
-              await fetch(`/api/timelines/${timeline.id}`, {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ title: newTitle }),
-              });
-              onReloadProjectData();
-            }
+            setInlinePrompt({ action: "rename-timeline", label: "Rename timeline", defaultValue: timeline.title, targetId: timeline.id });
           }}
           className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover/item:opacity-100 hover:text-violet-300 transition-opacity p-1"
           title="Rename"
@@ -374,6 +514,18 @@ export default function ProjectSidebar({
 
       {activeProjectId && (
         <>
+          {/* Inline prompt/confirm rendered at top of content area */}
+          {inlinePrompt && !["rename-doc", "rename-wiki", "rename-timeline"].includes(inlinePrompt.action) && (
+            <div className="border-b border-violet-600/50 px-3 py-2">
+              <TerminalPrompt
+                label={inlinePrompt.label}
+                defaultValue={inlinePrompt.defaultValue}
+                onSubmit={handleInlinePromptSubmit}
+                onCancel={() => setInlinePrompt(null)}
+              />
+            </div>
+          )}
+
           <div className="flex-1 min-h-0 overflow-y-auto">
           <div className="flex flex-col gap-1 border-b border-violet-600/50 px-3 py-3 min-h-[100px]">
             <div className="group flex items-center justify-between">
@@ -383,7 +535,7 @@ export default function ProjectSidebar({
               <div className="flex items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100">
                 <button
                   type="button"
-                  onClick={handleCreateTimeline}
+                  onClick={() => setInlinePrompt({ action: "new-timeline", label: "Timeline title" })}
                   className="text-[10px] font-bold uppercase tracking-widest text-violet-600 hover:text-violet-300"
                   title="New Timeline"
                 >
@@ -413,7 +565,7 @@ export default function ProjectSidebar({
               <div className="flex items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100">
                 <button
                   type="button"
-                  onClick={() => handleCreateFolder("document")}
+                  onClick={() => setInlinePrompt({ action: "new-folder-doc", label: "Folder name" })}
                   className="text-[10px] font-bold uppercase tracking-widest text-violet-600 hover:text-violet-300"
                   title="New Folder"
                 >
@@ -421,16 +573,16 @@ export default function ProjectSidebar({
                 </button>
                 <button
                   type="button"
-                  onClick={handleCreateDocument}
+                  onClick={() => setInlinePrompt({ action: "new-doc", label: "Crystal title" })}
                   className="text-[10px] font-bold uppercase tracking-widest text-violet-600 hover:text-violet-300"
-                  title="New Document"
+                  title="New Crystal"
                 >
                   [+DOC]
                 </button>
               </div>
             </div>
             <div className="flex flex-col mt-2 font-mono">
-              {folders.filter(f => f.type === "document").map(folder => (
+              {documentFolders.map(folder => (
                 <div key={folder.id} className="flex flex-col border-b border-violet-900/40 font-mono">
                   <div 
                     className={`group flex w-full items-center gap-2 px-2 py-1 text-left text-violet-400 hover:bg-violet-500 hover:text-black cursor-pointer transition-colors ${
@@ -475,15 +627,15 @@ export default function ProjectSidebar({
                     </button>
                   </div>
                   {expandedFolders.has(folder.id) && (
-                    <div className="flex flex-col border-l-2 border-violet-900/30 ml-2 animate-in fade-in duration-150">
-                      {documents.filter(d => d.folderId === folder.id).map(d => renderDocumentItem(d, 1))}
+                    <div className="flex flex-col border-l-2 border-violet-900/30 ml-2 animate-fade-in">
+                      {(documentsByFolder.get(folder.id) ?? []).map(d => renderDocumentItem(d, 1))}
                     </div>
                   )}
                 </div>
               ))}
-              {documents.filter(d => !d.folderId).map(d => renderDocumentItem(d, 0))}
-              {documents.length === 0 && folders.filter(f => f.type === "document").length === 0 && (
-                <span className="px-2 py-2 text-xs text-violet-800">No documents yet</span>
+              {(documentsByFolder.get(null) ?? []).map(d => renderDocumentItem(d, 0))}
+              {documents.length === 0 && documentFolders.length === 0 && (
+                <span className="px-2 py-2 text-xs text-violet-800">No crystals yet</span>
               )}
             </div>
           </div>
@@ -503,7 +655,7 @@ export default function ProjectSidebar({
               <div className="flex items-center gap-2 opacity-0 transition-opacity group-hover:opacity-100">
                 <button
                   type="button"
-                  onClick={() => handleCreateFolder("wiki")}
+                  onClick={() => setInlinePrompt({ action: "new-folder-wiki", label: "Folder name" })}
                   className="text-[10px] font-bold uppercase tracking-widest text-violet-600 hover:text-violet-300"
                   title="New Folder"
                 >
@@ -511,16 +663,16 @@ export default function ProjectSidebar({
                 </button>
                 <button
                   type="button"
-                  onClick={handleCreateWiki}
+                  onClick={() => setInlinePrompt({ action: "new-wiki", label: "Artifact title" })}
                   className="text-[10px] font-bold uppercase tracking-widest text-violet-600 hover:text-violet-300"
-                  title="New Wiki"
+                  title="New Artifact"
                 >
                   [+ENT]
                 </button>
               </div>
             </div>
             <div className="flex flex-col mt-2 font-mono">
-              {folders.filter(f => f.type === "wiki").map(folder => (
+              {wikiFolders.map(folder => (
                 <div key={folder.id} className="flex flex-col border-b border-violet-900/40 font-mono">
                   <div 
                     className={`group flex w-full items-center gap-2 px-2 py-1 text-left text-violet-400 hover:bg-violet-500 hover:text-black cursor-pointer transition-colors ${
@@ -552,15 +704,15 @@ export default function ProjectSidebar({
                     <span className="truncate font-bold uppercase tracking-widest flex-1">{folder.name}/</span>
                   </div>
                   {expandedFolders.has(folder.id) && (
-                    <div className="flex flex-col border-l-2 border-violet-900/30 ml-2 animate-in fade-in duration-150">
-                      {wikiEntries.filter(w => w.folderId === folder.id).map(w => renderWikiItem(w, 1))}
+                    <div className="flex flex-col border-l-2 border-violet-900/30 ml-2 animate-fade-in">
+                      {(wikiEntriesByFolder.get(folder.id) ?? []).map(w => renderWikiItem(w, 1))}
                     </div>
                   )}
                 </div>
               ))}
-              {wikiEntries.filter(w => !w.folderId).map(w => renderWikiItem(w, 0))}
-              {wikiEntries.length === 0 && folders.filter(f => f.type === "wiki").length === 0 && (
-                <span className="px-2 py-2 text-xs text-violet-800">No entries yet</span>
+              {(wikiEntriesByFolder.get(null) ?? []).map(w => renderWikiItem(w, 0))}
+              {wikiEntries.length === 0 && wikiFolders.length === 0 && (
+                <span className="px-2 py-2 text-xs text-violet-800">No artifacts yet</span>
               )}
             </div>
           </div>

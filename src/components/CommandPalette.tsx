@@ -37,6 +37,7 @@ export default function CommandPalette({ open, onClose, projectId, onNavigate }:
   const [loading, setLoading] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const paletteRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -100,13 +101,29 @@ export default function CommandPalette({ open, onClose, projectId, onNavigate }:
         onClose();
       } else if (e.key === "ArrowDown") {
         e.preventDefault();
-        setSelectedIndex((i) => Math.min(i + 1, results.length - 1));
+        setSelectedIndex((i) => results.length === 0 ? 0 : Math.min(i + 1, results.length - 1));
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
         setSelectedIndex((i) => Math.max(i - 1, 0));
       } else if (e.key === "Enter" && results[selectedIndex]) {
         e.preventDefault();
         selectResult(results[selectedIndex]);
+      } else if (e.key === "Tab") {
+        const container = paletteRef.current;
+        if (!container) return;
+        const focusable = container.querySelectorAll<HTMLElement>(
+          'input, button, select, textarea, [tabindex]:not([tabindex="-1"])'
+        );
+        if (focusable.length === 0) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
       }
     },
     [onClose, results, selectedIndex, selectResult]
@@ -120,6 +137,9 @@ export default function CommandPalette({ open, onClose, projectId, onNavigate }:
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Search"
       className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]"
       onClick={onClose}
     >
@@ -128,8 +148,10 @@ export default function CommandPalette({ open, onClose, projectId, onNavigate }:
 
       {/* palette */}
       <div
+        ref={paletteRef}
         className="relative z-10 flex w-full max-w-xl flex-col border border-violet-500/60 bg-[#020005] shadow-[0_0_40px_rgba(139,92,246,0.2)]"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={handleKeyDown}
       >
         {/* header bar */}
         <div className="flex items-center gap-2 border-b border-violet-500/40 px-3 py-2 text-[9px] font-bold uppercase tracking-[0.25em] text-violet-600 font-mono">
@@ -146,7 +168,7 @@ export default function CommandPalette({ open, onClose, projectId, onNavigate }:
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder={projectId ? "Search documents, articles, timelines..." : "No project selected"}
+            placeholder={projectId ? "Search crystals, artifacts, timelines..." : "No project selected"}
             disabled={!projectId}
             className="w-full bg-transparent font-mono text-sm text-violet-100 placeholder:text-violet-700 outline-none caret-violet-400 disabled:opacity-40"
             autoComplete="off"

@@ -8,6 +8,11 @@ const ChatUpdateSchema = z.object({
   glyphId: z.string().min(1),
 });
 
+const BranchUpdateSchema = z.object({
+  branchChoicesJson: z.string(),
+  activeTipMessageId: z.string(),
+});
+
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ chatId: string }> }
@@ -23,6 +28,29 @@ export async function PATCH(
   if (!scope) return Response.json({ error: "Chat not found" }, { status: 404 });
 
   scope.chat.glyphId = parsed.data.glyphId;
+  scope.chat.updatedAt = new Date().toISOString();
+
+  await writeChat(scope.projectId, scope.chat);
+
+  return Response.json(scope.chat);
+}
+
+export async function PUT(
+  req: Request,
+  { params }: { params: Promise<{ chatId: string }> }
+) {
+  const { chatId } = await params;
+  const json = await req.json().catch(() => null);
+  const parsed = BranchUpdateSchema.safeParse(json);
+  if (!parsed.success) {
+    return Response.json({ error: "Invalid payload" }, { status: 400 });
+  }
+
+  const scope = await findChatScope(chatId);
+  if (!scope) return Response.json({ error: "Chat not found" }, { status: 404 });
+
+  scope.chat.branchChoicesJson = parsed.data.branchChoicesJson;
+  scope.chat.activeTipMessageId = parsed.data.activeTipMessageId;
   scope.chat.updatedAt = new Date().toISOString();
 
   await writeChat(scope.projectId, scope.chat);

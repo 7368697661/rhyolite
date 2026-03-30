@@ -22,10 +22,7 @@ export async function POST(req: Request) {
   const parsed = GlyphCreateSchema.safeParse(json);
   
   if (!parsed.success) {
-    return new Response(JSON.stringify({ error: "Invalid payload", details: parsed.error }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+    return Response.json({ error: "Invalid payload", details: parsed.error }, { status: 400 });
   }
 
   const glyphs = await readGlyphs();

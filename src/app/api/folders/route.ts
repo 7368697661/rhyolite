@@ -14,10 +14,7 @@ export async function GET(req: Request) {
   const projectId = searchParams.get("projectId");
 
   if (!projectId) {
-    return new Response(JSON.stringify({ error: "Missing projectId" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+    return Response.json({ error: "Missing projectId" }, { status: 400 });
   }
 
   const folders = await readFolders(projectId);
@@ -34,10 +31,7 @@ export async function POST(req: Request) {
   const json = await req.json().catch(() => null);
   const parsed = FolderCreateSchema.safeParse(json);
   if (!parsed.success) {
-    return new Response(JSON.stringify({ error: "Invalid payload", details: parsed.error }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+    return Response.json({ error: "Invalid payload", details: parsed.error }, { status: 400 });
   }
 
   const projectId = parsed.data.projectId;

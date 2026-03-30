@@ -24,19 +24,3 @@ export function collectSubtreeIds(rootId: string, messages: Msg[]): string[] {
   return [...out];
 }
 
-/** Delete children before parents (FK-safe). */
-export function subtreeDeleteOrder(rootId: string, messages: Msg[]): string[] {
-  const inSubtree = new Set(collectSubtreeIds(rootId, messages));
-  const kids = childrenByParentId(messages);
-  const out: string[] = [];
-  const q = [rootId];
-  while (q.length) {
-    const id = q.shift()!;
-    if (!inSubtree.has(id)) continue;
-    out.push(id);
-    for (const c of kids.get(id) ?? []) {
-      if (inSubtree.has(c)) q.push(c);
-    }
-  }
-  return out.reverse();
-}

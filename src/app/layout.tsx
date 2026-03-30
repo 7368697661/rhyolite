@@ -16,8 +16,8 @@ const fraunces = Fraunces({
 });
 
 export const metadata: Metadata = {
-  title: "Rhyolite",
-  description: "Rhyolite — chat with Gemini."
+  title: "Rhyolite//",
+  description: "Rhyolite// — terminal-grade creative + research environment with multi-provider LLMs, DAG reasoning, and hybrid RAG."
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

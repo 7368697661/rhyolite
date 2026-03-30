@@ -1,4 +1,4 @@
-import { listProjects, listTimelines, listDocuments, readDocumentTimeline, readProject, readDocument, readWikiEntry, listWikiEntries, type FsTimelineEvent, type FsEventEdge, type FsProject, type FsDocument, type FsWikiEntry } from "./fs-db";
+import { listProjects, listTimelines, listDocuments, readDocumentTimeline, readDocument, readWikiEntry, listWikiEntries, type FsTimelineEvent, type FsEventEdge, type FsProject, type FsDocument, type FsWikiEntry } from "./fs-db";
 
 /** BFS backward through edges (parents of active node), up to `depth` hops. */
 function getAncestorSubgraph(
@@ -30,35 +30,19 @@ function getAncestorSubgraph(
   return { ancestorIds: Array.from(nodeIds), subgraphEdges: Array.from(relevantEdges) };
 }
 
-async function findProjectIdForNode(nodeId: string): Promise<string | null> {
-  const projects = await listProjects();
-  for (const p of projects) {
-    const timelines = await listTimelines(p.id);
-    for (const t of timelines) {
-      if (t.events.some((e) => e.id === nodeId)) return p.id;
-    }
-    const docs = await listDocuments(p.id);
-    for (const d of docs) {
-      const data = await readDocumentTimeline(p.id, d.id);
-      if (data.events.some((e) => e.id === nodeId)) return p.id;
-    }
-  }
-  return null;
-}
-
-async function getFullTimelineGraph(nodeId: string): Promise<{ activeNode: FsTimelineEvent, allNodes: FsTimelineEvent[], allEdges: FsEventEdge[] } | null> {
+async function getFullTimelineGraph(nodeId: string): Promise<{ activeNode: FsTimelineEvent, allNodes: FsTimelineEvent[], allEdges: FsEventEdge[], projectId: string } | null> {
   const projects = await listProjects();
   for (const p of projects) {
     const timelines = await listTimelines(p.id);
     for (const t of timelines) {
       const node = t.events.find((e) => e.id === nodeId);
-      if (node) return { activeNode: node, allNodes: t.events, allEdges: t.edges };
+      if (node) return { activeNode: node, allNodes: t.events, allEdges: t.edges, projectId: p.id };
     }
     const docs = await listDocuments(p.id);
     for (const d of docs) {
       const data = await readDocumentTimeline(p.id, d.id);
       const node = data.events.find((e) => e.id === nodeId);
-      if (node) return { activeNode: node, allNodes: data.events, allEdges: data.edges };
+      if (node) return { activeNode: node, allNodes: data.events, allEdges: data.edges, projectId: p.id };
     }
   }
   return null;
@@ -89,11 +73,9 @@ export async function buildTimelineDagRagFragment(
   const graph = await getFullTimelineGraph(activeTimelineEventId);
   if (!graph) return "";
 
-  const { activeNode, allNodes, allEdges } = graph;
+  const { activeNode, allNodes, allEdges, projectId } = graph;
   const { ancestorIds, subgraphEdges } = getAncestorSubgraph(activeNode.id, allEdges, 10);
   const ancestorNodes = allNodes.filter((n) => ancestorIds.includes(n.id));
-
-  const projectId = await findProjectIdForNode(activeTimelineEventId);
 
   let ragContextText = `[TIMELINE DAG CONTEXT]\n`;
   ragContextText += `Active Node: [${activeNode.nodeType || "Event"}] "${activeNode.title}"\n`;

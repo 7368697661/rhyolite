@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import ProjectSidebar from "./ProjectSidebar";
 import DocumentEditorPane from "./DocumentEditorPane";
 import ChatPane from "./ChatPane";
@@ -24,6 +24,25 @@ export type ActiveItem = {
   id: string;
 };
 
+function StatusClock() {
+  const [time, setTime] = useState("");
+  useEffect(() => {
+    const tick = () =>
+      setTime(
+        new Date().toLocaleTimeString(undefined, {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: false,
+        })
+      );
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, []);
+  return <time className="tabular-nums font-mono text-[11px] text-violet-300">{time}</time>;
+}
+
 export default function WorkspaceClient() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
@@ -34,10 +53,16 @@ export default function WorkspaceClient() {
   const [folders, setFolders] = useState<Folder[]>([]);
 
   const [activeTimelineEventId, setActiveTimelineEventId] = useState<string | null>(null);
+  const [editorCursorPos, setEditorCursorPos] = useState<number>(0);
 
   // Navigation History Stack
   const [history, setHistory] = useState<ActiveItem[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  const historyIndexRef = useRef(historyIndex);
+
+  useEffect(() => {
+    historyIndexRef.current = historyIndex;
+  }, [historyIndex]);
 
   const activeItem = history[historyIndex] ?? null;
 
@@ -91,12 +116,13 @@ export default function WorkspaceClient() {
   }, [activeProjectId]);
 
   const navigateTo = (item: ActiveItem) => {
+    const idx = historyIndexRef.current;
     setHistory((prev) => {
-      const newHistory = prev.slice(0, historyIndex + 1);
+      const newHistory = prev.slice(0, idx + 1);
       newHistory.push(item);
       return newHistory;
     });
-    setHistoryIndex((prev) => prev + 1);
+    setHistoryIndex(idx + 1);
   };
 
   const goBack = () => {
@@ -120,22 +146,6 @@ export default function WorkspaceClient() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  const [statusClock, setStatusClock] = useState("");
-  useEffect(() => {
-    const tick = () =>
-      setStatusClock(
-        new Date().toLocaleTimeString(undefined, {
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-          hour12: false,
-        })
-      );
-    tick();
-    const id = window.setInterval(tick, 1000);
-    return () => window.clearInterval(id);
-  }, []);
-
   const activeProjectName =
     projects.find((p) => p.id === activeProjectId)?.name ?? null;
 
@@ -152,9 +162,7 @@ export default function WorkspaceClient() {
           const chatInput = document.getElementById("chat-input");
           if (chatInput) chatInput.focus();
         },
-        "mod+shift+n": () => {
-          console.log("[useHotkeys] mod+shift+n: new document shortcut triggered");
-        },
+        "mod+shift+n": () => {},
       }),
       [activeItem]
     )
@@ -172,7 +180,7 @@ export default function WorkspaceClient() {
               &gt;_
             </span>
             <span className="font-heading text-lg tracking-[0.3em] text-violet-200 [text-shadow:0_0_10px_rgba(167,139,250,0.8)]">
-              RHYOLITE_OS
+              RHYOLITE//
             </span>
           </div>
           <div className="hidden sm:flex flex-col border-l border-violet-800/60 pl-4">
@@ -210,7 +218,7 @@ export default function WorkspaceClient() {
           </button>
           <div className="flex flex-col text-right">
             <span className="text-[8px] text-violet-600 tracking-[0.3em]">Local Time</span>
-            <time className="tabular-nums font-mono text-[11px] text-violet-300">{statusClock}</time>
+            <StatusClock />
           </div>
         </div>
       </header>
@@ -257,6 +265,7 @@ export default function WorkspaceClient() {
             onNavigate={navigateTo}
             activeTimelineEventId={activeTimelineEventId}
             onTimelineEventSelect={setActiveTimelineEventId}
+            onCursorChange={setEditorCursorPos}
           />
         </main>
 
@@ -265,6 +274,7 @@ export default function WorkspaceClient() {
             activeItem={activeItem}
             activeProjectId={activeProjectId}
             activeTimelineEventId={activeTimelineEventId}
+            cursorPosition={editorCursorPos}
             onAppendToDocument={async (text) => {
               let targetDocId: string | null = null;
               if (activeTimelineEventId) {

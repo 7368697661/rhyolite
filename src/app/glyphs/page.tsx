@@ -76,7 +76,7 @@ export default function GlyphsPage() {
           <div className="flex items-center gap-2">
             <span className="h-2 w-2 rounded-full bg-violet-500 animate-pulse"></span>
             <span className="font-heading text-lg tracking-[0.3em] text-violet-200 [text-shadow:0_0_10px_rgba(167,139,250,0.8)]">
-              RHYOLITE_OS
+              RHYOLITE//
             </span>
           </div>
           <div className="hidden sm:flex flex-col border-l border-violet-800/60 pl-4">

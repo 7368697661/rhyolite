@@ -9,7 +9,8 @@ export async function GET(
   req: Request,
   { params }: { params: Promise<{ filename: string }> },
 ) {
-  const { filename } = await params;
+  const { filename: rawFilename } = await params;
+  const filename = path.basename(rawFilename);
   const url = new URL(req.url);
   const type = url.searchParams.get("type");
   const id = url.searchParams.get("id");

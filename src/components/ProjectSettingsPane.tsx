@@ -29,13 +29,16 @@ export default function ProjectSettingsPane({
 
   const handleSave = async () => {
     setIsSaving(true);
-    await fetch(`/api/projects/${project.id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ storyOutline, loreBible }),
-    });
-    setIsSaving(false);
-    onReloadProjects();
+    try {
+      await fetch(`/api/projects/${project.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storyOutline, loreBible }),
+      });
+      onReloadProjects();
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (

@@ -3,13 +3,17 @@ import { extractEntityMentions } from "@/lib/entityExtractor";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(req: Request) {
-  const url = new URL(req.url);
-  const projectId = url.searchParams.get("projectId");
-  const content = url.searchParams.get("content");
-  const selfId = url.searchParams.get("selfId") ?? undefined;
+export async function POST(req: Request) {
+  const json = await req.json().catch(() => null);
+  if (!json) return Response.json({ error: "Invalid JSON body" }, { status: 400 });
 
-  if (!projectId || content === null) {
+  const { projectId, content, selfId } = json as {
+    projectId?: string;
+    content?: string;
+    selfId?: string;
+  };
+
+  if (!projectId || content === undefined) {
     return Response.json(
       { error: "projectId and content are required" },
       { status: 400 },

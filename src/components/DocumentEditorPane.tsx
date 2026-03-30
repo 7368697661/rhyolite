@@ -13,6 +13,7 @@ import { WikiMarkdown } from "./WikiMarkdown";
 import ProjectSettingsPane from "./ProjectSettingsPane";
 import TimelineCanvas from "./TimelineCanvas";
 import GlobalMapCanvas from "./GlobalMapCanvas";
+import TerminalPrompt from "./TerminalPrompt";
 
 export default function DocumentEditorPane({
   activeItem,
@@ -29,6 +30,7 @@ export default function DocumentEditorPane({
   onNavigate,
   activeTimelineEventId,
   onTimelineEventSelect,
+  onCursorChange,
 }: {
   activeItem: ActiveItem | null;
   documents: Document[];
@@ -44,6 +46,7 @@ export default function DocumentEditorPane({
   onNavigate: (item: ActiveItem) => void;
   activeTimelineEventId: string | null;
   onTimelineEventSelect: (id: string | null) => void;
+  onCursorChange?: (pos: number) => void;
 }) {
   const [content, setContent] = useState("");
   const [title, setTitle] = useState("");
@@ -60,6 +63,9 @@ export default function DocumentEditorPane({
   const [infillInstruction, setInfillInstruction] = useState("");
   const [isInfilling, setIsInfilling] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Extract-to-artifact inline prompt
+  const [extractPromptOpen, setExtractPromptOpen] = useState(false);
 
   // Entity link suggestions
   const [entitySuggestions, setEntitySuggestions] = useState<EntitySuggestion[]>([]);
@@ -124,12 +130,15 @@ export default function DocumentEditorPane({
       return;
     }
     try {
-      const params = new URLSearchParams({
-        projectId: itemData.projectId,
-        content,
-        selfId: activeItem.id,
+      const res = await fetch("/api/entities/suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectId: itemData.projectId,
+          content,
+          selfId: activeItem.id,
+        }),
       });
-      const res = await fetch(`/api/entities/suggest?${params}`);
       if (res.ok) {
         const data = await res.json();
         setEntitySuggestions(data.suggestions ?? []);
@@ -298,19 +307,23 @@ export default function DocumentEditorPane({
     if (!activeItem) return;
     setIsSaving(true);
 
-    const endpoint = activeItem.type === "document" ? `/api/documents/${activeItem.id}` : `/api/wiki/${activeItem.id}`;
-    await fetch(endpoint, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: newContent }),
-    });
-    setIsSaving(false);
-    onReloadProjectData();
+    try {
+      const endpoint = activeItem.type === "document" ? `/api/documents/${activeItem.id}` : `/api/wiki/${activeItem.id}`;
+      await fetch(endpoint, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: newContent }),
+      });
+      onReloadProjectData();
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleSelect = () => {
     if (!textareaRef.current) return;
     const t = textareaRef.current;
+    onCursorChange?.(t.selectionStart);
     if (t.selectionStart !== t.selectionEnd) {
       setSelection({
         start: t.selectionStart,
@@ -390,7 +403,7 @@ export default function DocumentEditorPane({
       return;
     }
 
-    alert(`Entity "${entityTitle}" not found (document or artifact) in this project.`);
+    alert(`Entity "${entityTitle}" not found (crystal or artifact) in this project.`);
   };
 
   const wordCount = previewContent.trim()
@@ -405,7 +418,7 @@ export default function DocumentEditorPane({
   if (!activeItem || !itemData) {
     return (
       <div className="flex h-full items-center justify-center border-b border-violet-900/50 px-4 text-sm text-violet-700">
-        <p>Select a chapter or wiki entry to start writing.</p>
+        <p>Select a crystal or artifact to start writing.</p>
       </div>
     );
   }
@@ -448,40 +461,21 @@ export default function DocumentEditorPane({
             </button>
           </div>
             <span className="shrink-0 text-[10px] font-bold uppercase tracking-[0.2em] text-violet-500">
-              [{activeItem.type === "document" ? "Chapter" : "Wiki"}]
+              [{activeItem.type === "document" ? "Crystal" : "Artifact"}]
             </span>
           <h2 className="min-w-0 truncate font-heading text-base font-semibold text-violet-100 [text-shadow:0_0_14px_rgba(167,139,250,0.2)]">
             {title}
           </h2>
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 text-xs text-violet-500">
-          {selection && !isInfilling && (
+          {selection && !isInfilling && !extractPromptOpen && (
             <>
               <button
                 type="button"
-                onClick={async () => {
-                  const wikiTitle = prompt("New Wiki Entry Name:");
-                  if (wikiTitle && itemData?.projectId) {
-                    const res = await fetch("/api/wiki", {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({
-                        title: wikiTitle,
-                        content: selection.text,
-                        projectId: itemData.projectId,
-                      }),
-                    });
-                    if (res.ok) {
-                      const newWiki = await res.json();
-                      onReloadProjectData();
-                      onNavigate({ type: "wiki", id: newWiki.id });
-                      setSelection(null);
-                    }
-                  }
-                }}
+                onClick={() => setExtractPromptOpen(true)}
                 className="border border-violet-700/60 bg-black px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-violet-200 hover:border-violet-500"
               >
-                Extract → Wiki
+                Extract → Artifact
               </button>
               <button
                 type="button"
@@ -497,6 +491,35 @@ export default function DocumentEditorPane({
           )}
         </div>
       </div>
+
+      {extractPromptOpen && selection && (
+        <div className="border-b border-violet-600/40 px-5 py-2">
+          <TerminalPrompt
+            label="New Artifact Name"
+            onSubmit={async (artifactTitle) => {
+              if (itemData?.projectId) {
+                const res = await fetch("/api/wiki", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    title: artifactTitle,
+                    content: selection.text,
+                    projectId: itemData.projectId,
+                  }),
+                });
+                if (res.ok) {
+                  const newWiki = await res.json();
+                  onReloadProjectData();
+                  onNavigate({ type: "wiki", id: newWiki.id });
+                  setSelection(null);
+                }
+              }
+              setExtractPromptOpen(false);
+            }}
+            onCancel={() => setExtractPromptOpen(false)}
+          />
+        </div>
+      )}
 
       {isInfillOpen && selection && (
         <div className="absolute left-3 right-3 top-14 z-10 flex items-center gap-2 border border-violet-500/50 bg-black p-2 shadow-uv-glow">
@@ -552,6 +575,7 @@ export default function DocumentEditorPane({
               value={content}
               onChange={(e) => {
                 setContent(e.target.value);
+                onCursorChange?.(e.target.selectionStart);
               }}
               onSelect={handleSelect}
               onBlur={() => handleSave(content)}
@@ -590,19 +614,28 @@ export default function DocumentEditorPane({
       {entitySuggestions.length > 0 && (
         <div className="shrink-0 border-t border-violet-700/40 bg-black px-4 py-1.5 flex items-center gap-2 overflow-x-auto font-mono z-10">
           <span className="shrink-0 text-[10px] font-bold uppercase tracking-widest text-violet-500">
-            ENTITY_LINKS_DETECTED: {entitySuggestions.length}
+            LINKABLE: {entitySuggestions.length}
           </span>
           <div className="flex items-center gap-1.5 overflow-x-auto">
             {entitySuggestions.map((s) => (
-              <button
-                key={s.entityId}
-                type="button"
-                onClick={() => applyEntityLink(s)}
-                className="shrink-0 border border-violet-700/60 bg-black px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-300 hover:border-violet-400 hover:text-violet-100 transition-colors"
-                title={`Link "${s.matchText}" → ${s.entityType === "wiki" ? "Wiki" : "Doc"}: ${s.entityTitle}`}
-              >
-                {s.entityTitle}
-              </button>
+              <span key={s.entityId} className="shrink-0 flex items-center border border-violet-700/60 bg-black">
+                <button
+                  type="button"
+                  onClick={() => onEntityLinkClick(s.entityTitle)}
+                  className="px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-300 hover:text-violet-100 transition-colors"
+                  title={`Open ${s.entityTitle}`}
+                >
+                  {s.matchText}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => applyEntityLink(s)}
+                  className="border-l border-violet-700/60 px-1.5 py-0.5 text-[10px] font-bold text-violet-500 hover:text-violet-300 transition-colors"
+                  title="Insert link brackets"
+                >
+                  +
+                </button>
+              </span>
             ))}
           </div>
         </div>
