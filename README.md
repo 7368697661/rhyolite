@@ -342,12 +342,13 @@ erDiagram
   Project ||--o{ Crystal : "has"
   Project ||--o{ Artifact : "has"
   Project ||--o{ Timeline : "has"
-  Project ||--o{ Folder : "organizes"
+  Project ||--o{ FsFolder : "organizes"
   Project ||--o{ Chat : "has"
   Project ||--o{ PromptTemplate : "has"
+  Project ||--o{ FsTemplate : "has"
 
-  Folder ||--o{ Crystal : "groups"
-  Folder ||--o{ Artifact : "groups"
+  FsFolder ||--o{ Crystal : "groups"
+  FsFolder ||--o{ Artifact : "groups"
 
   Timeline ||--o{ TimelineEvent : "nodes"
   Timeline ||--o{ Chat : "bound chat"
@@ -357,6 +358,7 @@ erDiagram
   TimelineEvent ||--o{ EventEdge : "source"
   TimelineEvent ||--o{ EventEdge : "target"
   TimelineEvent }o--o{ Artifact : "tags"
+  TimelineEvent }o--o{ FsTemplate : "uses"
 
   Glyph ||--o{ Chat : "persona"
   Glyph {
