@@ -239,19 +239,37 @@ sequenceDiagram
     participant User
     participant Editor as Document Editor
     participant API as resolve_dead_links
-    participant RAG as Embeddings
-    participant FS as fs-db
+    participant RAG as Context Engine
+    participant Res as Researcher Glyph
+    participant Wri as Writer Glyph
+    participant Aud as Auditor Glyph
+    participant FS as Filesystem
 
     User->>Editor: Clicks "Resolve [[links]]"
     Editor->>API: POST /api/documents/resolve-links
     API->>FS: Read document content
-    API->>API: Extract all [[Title]] targets
-    API->>FS: Check each against existing entities
-    loop For each dead link
-        API->>RAG: retrieveSimilar(title)
-        API->>FS: writeWikiEntry(stub)
+    API->>API: Extract all [[Title]] & [Text](<Target>) links
+    API->>FS: Check against existing Crystals & Artifacts
+    
+    loop For each missing link
+        API->>RAG: retrieveSimilar(title, 8 chunks)
+        RAG-->>API: Return relevant lore & context
+        
+        API->>Res: Generate Research Brief (Context + Surroundings)
+        Res-->>API: Structured brief (Entity type, inferences, facts)
+        
+        API->>FS: listTemplates() -> Wiki_Page_Template.md
+        
+        API->>Wri: Draft Article (Brief + Template)
+        Wri-->>API: Full 400-800 word markdown draft
+        
+        API->>Aud: Audit & Fix (Draft + Template + Brief)
+        Aud-->>API: Corrected, formatted markdown
+        
+        API->>FS: writeWikiEntry(Final Article)
+        API-->>Editor: Server-Sent Events (Progress Streaming)
     end
-    API-->>Editor: { created: [...], skipped: [...] }
+    API-->>Editor: { ok: true, created: [...] }
 ```
 
 ---
