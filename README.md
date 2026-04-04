@@ -68,47 +68,104 @@ Configurable profiles that control model, provider, temperature, system prompt, 
 
 ### Architecture
 
-The following diagram shows how the UI, API, context engine, and storage layers connect. User actions in the three-pane interface flow down through API routes, context assembly (hybrid RAG), and into LLM providers, with all data persisted as plain files on disk.
+The following diagram provides a holistic view of the entire Rhyolite system. It maps out how the 3-pane user interface connects to the API orchestration layer, how the 5-pillar context engine retrieves data from the local Obsidian-compatible vault, and how orchestrating Sculpter agents use 17 sandboxed tools or delegate to Specialist sub-agents to mutate that state.
 
 ```mermaid
-flowchart TB
-    subgraph UI ["UI Layer"]
-        Sidebar["Sidebar<br/>Projects · Crystals · Artifacts · Timelines"]
-        Editor["Editor<br/>Markdown · Preview · Infill"]
-        DAG["DAG Canvas<br/>reactflow · Synthesis"]
-        Comms["Comms<br/>Chat · Modes · Branches"]
+flowchart TD
+    subgraph UI [1. Interface & View Layer]
+        direction TB
+        Editor["Markdown Editor<br/>(Live Preview, Inline Infill, Wikilinks)"]
+        Comms["Comms Chat Panel<br/>(Ask / Agent / Plan Modes, Branch/Fork History)"]
+        Sidebar["Project Workspace<br/>(Folder D&D, Native OS Mapping)"]
+        Canvas["Interactive Canvas<br/>(reactflow DAG, d3-force Global Map)"]
+        CmdPalette["Command Palette<br/>(⌘K Full-Text Search)"]
     end
 
-    subgraph API ["API Layer"]
-        ChatAPI["/api/chat"]
-        TimelineAPI["/api/timeline"]
-        DocsAPI["/api/documents"]
-        WikiAPI["/api/wiki"]
-        GlyphsAPI["/api/glyphs"]
+    subgraph Logic [2. API & Orchestration Layer]
+        direction LR
+        Router["Next.js API Routes"]
+        subgraph DeadLink ["3-Stage Dead Link Pipeline"]
+            direction LR
+            DL_Res["1. Researcher<br/>(Builds Brief)"]
+            DL_Wri["2. Writer<br/>(Fills Template)"]
+            DL_Aud["3. Auditor<br/>(Fixes & Formats)"]
+            DL_Res --> DL_Wri --> DL_Aud
+        end
+        DAGSynth["DAG Auto-Synthesis<br/>(Upstream causality evaluation)"]
     end
 
-    subgraph CTX ["Context Engine"]
-        Canon["Core Canon<br/>(always on)"]
-        Keyword["Keyword RAG<br/>(title/alias match)"]
-        Embed["Embedding RAG<br/>(cosine similarity)"]
-        Graph["Graph Traversal<br/>(BFS ≤ 10 hops)"]
-        Window["Smart Windowing<br/>(cursor-based chunks)"]
+    subgraph Context [3. Hybrid RAG Engine (5-Pillar Context)]
+        direction TB
+        C_Assembler(("Context Assembler"))
+        C_Canon["1. Core Canon<br/>(Lore Bible + Story Outline)"]
+        C_Window["2. Smart Windowing<br/>(Cursor proximity chunks)"]
+        C_Graph["3. DAG Traversal<br/>(Up to 10-hop BFS causality)"]
+        C_Key["4. Keyword RAG<br/>(Title & Alias substring match)"]
+        C_Embed["5. Semantic RAG<br/>(text-embedding-004 cosine sim)"]
+        
+        C_Canon & C_Window & C_Graph & C_Key & C_Embed --> C_Assembler
     end
 
-    subgraph LLM ["LLM Providers"]
-        Gemini["Gemini"]
-        OpenAI["OpenAI-compat"]
-        Anthropic["Anthropic"]
+    subgraph Agents [4. Multi-Agent Engine]
+        direction TB
+        Sculpter["Sculpter Glyph (Orchestrator)<br/>Config: Provider, Model, Temp, Tokens"]
+        
+        subgraph Delegation [Specialist Sub-Agents (Inner Loop)]
+            direction LR
+            DelRouter{"delegate_to_specialist<br/>delegate_fan_out"}
+            SpRes["Researcher"]
+            SpCont["Continuity"]
+            SpTime["Timeline Builder"]
+            SpCustom["Custom Specialists"]
+            
+            DelRouter --> SpRes & SpCont & SpTime & SpCustom
+        end
+        
+        Sculpter -->|"Delegates Complex/Parallel Tasks"| DelRouter
+        SpRes & SpCont & SpTime & SpCustom -->|"Return Synthesis"| Sculpter
     end
 
-    subgraph FS ["Filesystem"]
-        Files["crystals/*.md<br/>artifacts/*.md<br/>timelines/*.json<br/>chats/*.json<br/>glyphs.json"]
+    subgraph Tooling [5. Tool Execution Sandbox (17 Tools)]
+        direction TB
+        T_Risk["Risk Assessment Guardrails<br/>(Risky Actions Trigger Inline UI Confirms)"]
+        T_Read["Read:<br/>search_artifacts, read_artifact,<br/>read_timeline, read_draft,<br/>search_project"]
+        T_Write["Write:<br/>create_artifact, update_artifact,<br/>delete_artifact, append_to_draft"]
+        T_Graph["Graph:<br/>create_timeline_node, update_timeline_node,<br/>delete_timeline_node, create_edge,<br/>delete_edge, auto_layout_dag"]
+        T_Agent["Agentic:<br/>resolve_dead_links, delegate_to_specialist,<br/>delegate_fan_out"]
+        
+        T_Risk --> T_Read & T_Write & T_Graph & T_Agent
     end
 
-    UI --> API
-    API --> CTX
-    CTX --> LLM
-    API --> FS
+    subgraph Storage [6. Filesystem (Obsidian Compatible Vault)]
+        direction LR
+        FS_Md["Markdown Entities<br/>(crystals/*.md, artifacts/*.md)"]
+        FS_Json["Structured State<br/>(timelines/*.json, chats/*.json, glyphs.json)"]
+        FS_Meta["Project Meta<br/>(_templates/*.md, embeddings.json, known-projects.json)"]
+    end
+
+    subgraph LLM [7. External LLM Brains]
+        direction LR
+        Gemini["Google Gemini"]
+        Anthropic["Anthropic Claude"]
+        OpenAI["OpenAI Compatible"]
+    end
+
+    %% Routing
+    UI -->|"User Prompt"| Router
+    Editor -->|"Resolve Dead Links"| DeadLink
+    Canvas -->|"Auto-Synthesize"| DAGSynth
+    
+    Router -->|"Fetch Context"| Context
+    C_Assembler -->|"Context Injection"| Sculpter
+    
+    Sculpter -->|"Autonomous Loop (Max 20)"| LLM
+    Delegation -->|"Nested Autonomous Loop (Max 8)"| LLM
+    DeadLink -->|"Uses Glyphs"| Delegation
+    DAGSynth -->|"Uses Templates"| FS_Meta
+    
+    LLM -->|"Triggers Tool Calls"| Tooling
+    Tooling -->|"Reads/Mutates State"| Storage
+    Storage -.->|"Live UI Reload"| UI
 ```
 
 ### RAG Context Assembly
