@@ -72,7 +72,7 @@ The following diagram provides a holistic view of the entire Rhyolite system. It
 
 ```mermaid
 flowchart TD
-    subgraph UI [1. Interface & View Layer]
+    subgraph UI ["1. Interface & View Layer"]
         direction TB
         Editor["Markdown Editor<br/>(Live Preview, Inline Infill, Wikilinks)"]
         Comms["Comms Chat Panel<br/>(Ask / Agent / Plan Modes, Branch/Fork History)"]
@@ -81,7 +81,7 @@ flowchart TD
         CmdPalette["Command Palette<br/>(⌘K Full-Text Search)"]
     end
 
-    subgraph Logic [2. API & Orchestration Layer]
+    subgraph Logic ["2. API & Orchestration Layer"]
         direction LR
         Router["Next.js API Routes"]
         subgraph DeadLink ["3-Stage Dead Link Pipeline"]
@@ -94,7 +94,7 @@ flowchart TD
         DAGSynth["DAG Auto-Synthesis<br/>(Upstream causality evaluation)"]
     end
 
-    subgraph Context [3. Hybrid RAG Engine (5-Pillar Context)]
+    subgraph Context ["3. Hybrid RAG Engine (5-Pillar Context)"]
         direction TB
         C_Assembler(("Context Assembler"))
         C_Canon["1. Core Canon<br/>(Lore Bible + Story Outline)"]
@@ -106,11 +106,11 @@ flowchart TD
         C_Canon & C_Window & C_Graph & C_Key & C_Embed --> C_Assembler
     end
 
-    subgraph Agents [4. Multi-Agent Engine]
+    subgraph Agents ["4. Multi-Agent Engine"]
         direction TB
         Sculpter["Sculpter Glyph (Orchestrator)<br/>Config: Provider, Model, Temp, Tokens"]
         
-        subgraph Delegation [Specialist Sub-Agents (Inner Loop)]
+        subgraph Delegation ["Specialist Sub-Agents (Inner Loop)"]
             direction LR
             DelRouter{"delegate_to_specialist<br/>delegate_fan_out"}
             SpRes["Researcher"]
@@ -125,7 +125,7 @@ flowchart TD
         SpRes & SpCont & SpTime & SpCustom -->|"Return Synthesis"| Sculpter
     end
 
-    subgraph Tooling [5. Tool Execution Sandbox (17 Tools)]
+    subgraph Tooling ["5. Tool Execution Sandbox (17 Tools)"]
         direction TB
         T_Risk["Risk Assessment Guardrails<br/>(Risky Actions Trigger Inline UI Confirms)"]
         T_Read["Read:<br/>search_artifacts, read_artifact,<br/>read_timeline, read_draft,<br/>search_project"]
@@ -136,14 +136,14 @@ flowchart TD
         T_Risk --> T_Read & T_Write & T_Graph & T_Agent
     end
 
-    subgraph Storage [6. Filesystem (Obsidian Compatible Vault)]
+    subgraph Storage ["6. Filesystem (Obsidian Compatible Vault)"]
         direction LR
         FS_Md["Markdown Entities<br/>(crystals/*.md, artifacts/*.md)"]
         FS_Json["Structured State<br/>(timelines/*.json, chats/*.json, glyphs.json)"]
         FS_Meta["Project Meta<br/>(_templates/*.md, embeddings.json, known-projects.json)"]
     end
 
-    subgraph LLM [7. External LLM Brains]
+    subgraph LLM ["7. External LLM Brains"]
         direction LR
         Gemini["Google Gemini"]
         Anthropic["Anthropic Claude"]
