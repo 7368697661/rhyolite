@@ -3,7 +3,7 @@ import { GoogleGenAI } from "@google/genai";
 import { buildTimelineDagRagFragment } from "@/lib/timelineDagContext";
 import { findNodeScope } from "../../scope";
 import { saveTimelineScope } from "../../../resolveScope";
-import { readWikiEntry } from "@/lib/fs-db";
+import { readWikiEntry, readTemplate } from "@/lib/fs-db";
 
 export async function POST(
   request: Request,
@@ -11,12 +11,27 @@ export async function POST(
 ) {
   try {
     const { nodeId } = await params;
-    
+    const body = await request.json().catch(() => ({}));
+    const templateFilename = body?.templateFilename as string | undefined;
+
     const scope = await findNodeScope(nodeId);
     if (!scope) {
       return NextResponse.json({ error: "Node not found" }, { status: 404 });
     }
     const node = scope.node;
+
+    // Load template if specified
+    let templateContent: string | null = null;
+    if (templateFilename) {
+      const tmpl = await readTemplate(scope.projectId, templateFilename);
+      if (tmpl) {
+        const now = new Date().toISOString().replace(/[-:]/g, "").slice(0, 13) + "Z";
+        templateContent = tmpl.content
+          .replace(/\{\{title\}\}/g, node.title)
+          .replace(/\{\{date:[^}]+\}\}/g, now)
+          .replace(/\{\{author\}\}/g, "Rhyolite");
+      }
+    }
 
     // Build the DAG RAG Fragment
     const ragContext = await buildTimelineDagRagFragment(nodeId);
@@ -31,7 +46,25 @@ export async function POST(
 
     const ai = new GoogleGenAI({ apiKey });
 
-    const systemInstruction = `You are a logical synthesis engine for a Directed Acyclic Graph (DAG) system.
+    let systemInstruction: string;
+    if (templateContent) {
+      systemInstruction = `You are a worldbuilding lorekeeper and synthesis engine for a DAG system.
+You will be given upstream DAG context and a template to follow.
+Your job is to:
+1. Analyze the upstream nodes and their relationships.
+2. Fill in the provided template with rich, specific content derived from the upstream context.
+3. Replace all HTML comments (<!-- ... -->) with actual content.
+4. Keep all relevant sections; remove sections that don't apply.
+5. Use [[Entity Name]] wikilinks when referencing other entities.
+
+Provide your response strictly as a JSON object with two keys:
+{
+  "content": "The fully filled-in template content in markdown.",
+  "summary": "A concise 1-3 sentence summary."
+}
+Do NOT wrap the JSON in markdown code blocks. Just return the raw JSON string.`;
+    } else {
+      systemInstruction = `You are a logical synthesis engine for a Directed Acyclic Graph (DAG) system.
 Your job is to read the upstream DAG logic, analyze the relationship chains, and synthesize the content and summary for the target node.
 You will be provided with:
 1. The Target Node's Title and Node Type.
@@ -45,12 +78,28 @@ Provide your response strictly as a JSON object with two keys:
   "summary": "A concise 1-3 sentence summary of the content."
 }
 Do NOT wrap the JSON in markdown code blocks. Just return the raw JSON string.`;
+    }
 
-    const promptText = `
+    let promptText: string;
+    if (templateContent) {
+      promptText = `
+${ragContext}
+
+Use the following template to structure the content for the Active Node: [${node.nodeType || "Event"}] "${node.title}".
+
+--- TEMPLATE ---
+${templateContent}
+--- END TEMPLATE ---
+
+Fill in every section of the template with content derived from the upstream DAG context. Be specific, creative, and consistent with the established lore.
+`;
+    } else {
+      promptText = `
 ${ragContext}
 
 Please synthesize the content and summary for the Active Node: [${node.nodeType || "Event"}] "${node.title}".
 `;
+    }
 
     const response = await ai.models.generateContent({
       model: "gemini-2.5-pro",

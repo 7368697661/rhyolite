@@ -5,6 +5,8 @@ import ProjectSidebar from "./ProjectSidebar";
 import DocumentEditorPane from "./DocumentEditorPane";
 import ChatPane from "./ChatPane";
 import CommandPalette from "./CommandPalette";
+import WelcomeScreen from "./WelcomeScreen";
+import DocsModal from "./DocsModal";
 import { useHotkeys } from "@/lib/useHotkeys";
 
 export type Project = {
@@ -133,7 +135,23 @@ export default function WorkspaceClient() {
     if (historyIndex < history.length - 1) setHistoryIndex((prev) => prev + 1);
   };
 
+  const [showWelcome, setShowWelcome] = useState(false);
+  const [isCreatingExample, setIsCreatingExample] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [docsOpen, setDocsOpen] = useState(false);
+
+  useEffect(() => {
+    if (projects.length === 0) {
+      try {
+        const dismissed = localStorage.getItem("rhyolite-welcome-dismissed");
+        setShowWelcome(dismissed !== "1");
+      } catch {
+        setShowWelcome(true);
+      }
+    } else {
+      setShowWelcome(false);
+    }
+  }, [projects]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -141,10 +159,17 @@ export default function WorkspaceClient() {
         e.preventDefault();
         setCommandPaletteOpen((prev) => !prev);
       }
+      if (e.key === "Escape" && docsOpen) {
+        setDocsOpen(false);
+      }
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "/") {
+        e.preventDefault();
+        setDocsOpen((prev) => !prev);
+      }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [docsOpen]);
 
   const activeProjectName =
     projects.find((p) => p.id === activeProjectId)?.name ?? null;
@@ -216,6 +241,14 @@ export default function WorkspaceClient() {
             <span className="font-mono">&gt;&gt;</span>
             [ GLOBAL_NETWORK ]
           </button>
+          <button
+            type="button"
+            onClick={() => setDocsOpen(true)}
+            className="hidden sm:flex items-center gap-1 border border-violet-700/60 bg-black px-2 py-2 text-[10px] font-bold uppercase tracking-widest text-violet-400 hover:border-violet-400 hover:bg-violet-950/40"
+            title="Documentation (⌘⇧/)"
+          >
+            ?
+          </button>
           <div className="flex flex-col text-right">
             <span className="text-[8px] text-violet-600 tracking-[0.3em]">Local Time</span>
             <StatusClock />
@@ -224,6 +257,35 @@ export default function WorkspaceClient() {
       </header>
 
       <div className="flex min-h-0 flex-1 relative">
+        {showWelcome && projects.length === 0 ? (
+          <WelcomeScreen
+            isCreating={isCreatingExample}
+            onCreateExample={async () => {
+              setIsCreatingExample(true);
+              try {
+                const res = await fetch("/api/projects/seed-example", { method: "POST" });
+                if (res.ok) {
+                  const { projectId } = await res.json();
+                  await reloadProjects();
+                  setActiveProjectId(projectId);
+                  setShowWelcome(false);
+                  try {
+                    localStorage.setItem("rhyolite-welcome-dismissed", "1");
+                  } catch { /* ignore */ }
+                }
+              } finally {
+                setIsCreatingExample(false);
+              }
+            }}
+            onDismiss={() => {
+              setShowWelcome(false);
+              try {
+                localStorage.setItem("rhyolite-welcome-dismissed", "1");
+              } catch { /* ignore */ }
+            }}
+          />
+        ) : (
+        <>
         <nav
           className="flex w-60 shrink-0 flex-col border-r border-violet-500/50 bg-[#020005]"
           aria-label="Project navigation"
@@ -275,6 +337,9 @@ export default function WorkspaceClient() {
             activeProjectId={activeProjectId}
             activeTimelineEventId={activeTimelineEventId}
             cursorPosition={editorCursorPos}
+            onWorkspaceRefresh={() => {
+              if (activeProjectId) reloadProjectData(activeProjectId);
+            }}
             onAppendToDocument={async (text) => {
               let targetDocId: string | null = null;
               if (activeTimelineEventId) {
@@ -313,6 +378,8 @@ export default function WorkspaceClient() {
             }}
           />
         </aside>
+        </>
+        )}
       </div>
 
       <CommandPalette
@@ -323,6 +390,8 @@ export default function WorkspaceClient() {
           navigateTo(item);
         }}
       />
+
+      <DocsModal open={docsOpen} onClose={() => setDocsOpen(false)} />
     </div>
   );
 }

@@ -2,6 +2,15 @@ export type BranchMessage = {
   id: string;
   role: "user" | "model";
   content: string;
+  reasoningContent?: string;
+  toolCalls?: Array<{
+    name: string;
+    args: Record<string, unknown>;
+    result: unknown;
+    ok: boolean;
+    confirmed?: boolean;
+  }>;
+  errors?: Array<{ code: string; message: string; detail?: string }>;
   createdAt: string | Date;
   parentMessageId: string | null;
 };

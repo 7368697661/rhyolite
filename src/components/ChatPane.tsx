@@ -12,23 +12,27 @@ export default function ChatPane({
   activeTimelineEventId,
   onAppendToDocument,
   cursorPosition,
+  onWorkspaceRefresh,
 }: {
   activeItem: ActiveItem | null;
   activeProjectId: string | null;
   activeTimelineEventId?: string | null;
   onAppendToDocument: (text: string) => void | Promise<void>;
   cursorPosition?: number;
+  onWorkspaceRefresh?: () => void;
 }) {
   const [chat, setChat] = useState<ChatPreview | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [glyphs, setGlyphs] = useState<{ id: string; name: string }[]>([]);
+  const [allGlyphs, setAllGlyphs] = useState<{ id: string; name: string; isSculpter?: boolean }[]>([]);
   const seqRef = useRef(0);
 
   useEffect(() => {
     fetch("/api/glyphs")
       .then((r) => r.json())
-      .then(setGlyphs);
+      .then(setAllGlyphs);
   }, []);
+
+  const sculpterGlyphs = allGlyphs.filter((g) => g.isSculpter !== false);
 
   const loadChat = async (kind: "document" | "timeline", id: string) => {
     const seq = ++seqRef.current;
@@ -101,8 +105,14 @@ export default function ChatPane({
 
   if (!activeItem) {
     return (
-      <div className="flex h-full items-center justify-center border-t border-violet-900/50 px-3 text-center text-[10px] uppercase tracking-widest text-violet-800 font-mono">
-        <p>[ OFFLINE ]</p>
+      <div className="flex h-full flex-col items-center justify-center gap-3 border-t border-violet-900/50 px-4 py-6 text-center">
+        <div className="text-violet-700 text-lg">▣</div>
+        <p className="text-[10px] uppercase tracking-widest text-violet-600 font-mono font-bold">
+          Comms Offline
+        </p>
+        <p className="text-[9px] text-violet-700 max-w-xs leading-relaxed">
+          Select a crystal, artifact, or timeline in the sidebar to open an AI chat session. Chat supports three modes: <strong className="text-violet-500">Ask</strong> (questions), <strong className="text-violet-500">Agent</strong> (AI tools), and <strong className="text-violet-500">Plan</strong> (review-then-execute).
+        </p>
       </div>
     );
   }
@@ -161,7 +171,7 @@ export default function ChatPane({
                 required
               >
                 <option value="">[ NONE_SELECTED ]</option>
-                {glyphs.map((g) => (
+                {sculpterGlyphs.map((g) => (
                   <option key={g.id} value={g.id}>
                     {g.name}
                   </option>
@@ -187,9 +197,10 @@ export default function ChatPane({
         activeTimelineEventId={activeTimelineEventId}
         onAppendToDocument={onAppendToDocument}
         glyphId={chat.glyphId}
-        glyphs={glyphs}
+        glyphs={allGlyphs}
         projectId={activeProjectId}
         cursorPosition={cursorPosition}
+        onWorkspaceRefresh={onWorkspaceRefresh}
         onChangeGlyph={async (glyphId) => {
           await fetch(`/api/chats/${chat.id}`, {
             method: "PATCH",

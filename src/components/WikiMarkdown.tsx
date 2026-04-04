@@ -83,8 +83,11 @@ export function WikiMarkdown({
 
   const processedContent = useMemo(() => {
     return content
-      .replace(/\[\[(.*?)\]\]/g, (m, title) => `[${title}](#entity:${encodeURIComponent(title)})`)
-      .replace(/\]\(\s*<([^>]+)>\s*\)/g, (m, inner) => `](#entity:${encodeURIComponent(inner)})`)
+      // [[Title|display text]] → [display text](#entity:Title)
+      .replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, (_m, target, display) => `[${display.trim()}](#entity:${encodeURIComponent(target.trim())})`)
+      // [[Title]] → [Title](#entity:Title)
+      .replace(/\[\[([^\]]+)\]\]/g, (_m, title) => `[${title}](#entity:${encodeURIComponent(title)})`)
+      .replace(/\]\(\s*<([^>]+)>\s*\)/g, (_m, inner) => `](#entity:${encodeURIComponent(inner)})`)
       .replace(/(?<!!)\[([^\]]{2,})\](?!\()/g, (m, inner) => {
         const t = String(inner).trim();
         if (!t) return m;

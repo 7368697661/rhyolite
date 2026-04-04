@@ -15,244 +15,323 @@
   <img alt="Storage" src="https://img.shields.io/badge/storage-local_filesystem-555?style=flat-square" />
 </p>
 
-### What it is
-- Local-first, single-user writing and research IDE with an integrated multi-provider LLM assistant
-- Terminal/hacker aesthetic UI (3-pane layout: file tree, editor, chat) — no cloud, no database, all files on disk as Markdown and JSON
-- Built for managing complex, multi-threaded narratives and structured reasoning chains alongside AI
+---
 
-### What it does
-- **Markdown authoring** with split-pane live preview, internal `[entity]` linking with hover previews, styled callouts, AI diff highlighting, and inline infill (select text, instruct the model to rewrite)
-- **DAG reasoning canvas** — each timeline is a directed acyclic graph (`reactflow`) where nodes are typed (Event, Scene, Hypothesis, Evidence, etc.) and edges are labeled with semantic relationships ("Supports", "Contradicts", "Implements")
-- **Hybrid RAG context assembly** — every chat prompt is backed by five context sources: always-on core canon (system instruction), keyword RAG (title/alias substring match), embedding RAG (cosine similarity via `text-embedding-004` vectors), graph traversal RAG (BFS up to 10 hops upstream through DAG edges), and cursor-aware smart windowing (sends relevant chunks of large documents instead of truncating)
-- **Auto-synthesis** — click a button on any DAG node and the engine traverses all upstream dependencies, collects content + edge semantics, and prompts the LLM to generate a synthesized conclusion
-- **Multi-provider LLM streaming** — Gemini, any OpenAI-compatible endpoint (local models, Together, etc.), and Anthropic, all behind a unified provider abstraction with per-persona configuration (model, temperature, max tokens, system prompt)
-- **Branching chat** — full message tree with fork/backtrack navigation, edit/delete on any message, regenerate with branch history persisted to disk
-- **Global network map** — `d3-force` physics-based graph of all documents, wiki entries, and timeline events with edges derived from content links, DAG relationships, entity references, and tags
-- **Full-text search** via `Cmd+K` command palette, auto entity link suggestions, manuscript export (full project or per-folder), version history (auto-snapshots on save), saved prompt templates
+## Quick Start
 
-### How it's used
-- Write chapters ("Crystals") and wiki entries ("Artifacts") in the editor; populate artifacts with characters, locations, systems — their titles/aliases are what the RAG retrieves
-- Build DAG timelines to map plot structure, cause-and-effect chains, or technical argument trees — drag documents/wiki into the graph as reference nodes
-- Chat is bound per-crystal or per-timeline; focusing a DAG node scopes the LLM's context to that node's upstream chain
-- No `@mention` syntax — retrieval is implicit via title matching and semantic similarity
-
-### Tech
-- Next.js 15 (App Router) + React 19, TypeScript 5.x
-- `reactflow` v11 + `d3-force` for canvas and network graph
-- Tailwind CSS, Monaspace Neon font (ligatures + texture healing)
-- `fs/promises` + `gray-matter` (YAML frontmatter Markdown) — zero-database persistence
-- `@google/genai` (Gemini), OpenAI-compatible REST, `@anthropic-ai/sdk` (Anthropic)
-- Gemini `text-embedding-004` for vector embeddings, custom full-text scoring for search
-- `zod` for API validation, `react-markdown` + `remark-gfm` for rendering
-- BSL 1.1 licensed (non-production free, converts to Apache 2.0 in 2030)
+1. **Clone and install**
+   ```bash
+   git clone https://github.com/7368697661/rhyolite.git
+   cd rhyolite && npm install
+   ```
+2. **Set up API keys** — copy `.env.example` to `.env` and add at minimum a `GEMINI_API_KEY`. Optionally add `OPENAI_API_KEY` + `OPENAI_BASE_URL` and/or `ANTHROPIC_API_KEY` for multi-provider support.
+3. **Start the dev server**
+   ```bash
+   npm run dev   # → http://localhost:3000
+   ```
+4. **Open the workspace** — you'll see a welcome screen with an option to create an example project (recommended for first-timers).
+5. **Create a project**, set your Core Canon and Story Outline in project settings, then start writing in Crystals.
+6. **Try different chat modes** — switch between Ask (questions), Agent (AI tools), and Plan (review-then-execute) in the comms header.
+7. **Configure glyphs** — visit the Glyph Registry page to create AI personas, including specialist sub-agents for delegation.
+8. **Press `⌘⇧/`** to open the in-app documentation for a full feature reference.
 
 ---
 
-## What is Rhyolite//
+## Core Concepts
 
-Rhyolite// is a local-first, keyboard-driven IDE for long-form fiction, worldbuilding, and technical research. It replaces the typical "smart notepad + chatbot" pattern with a high-density terminal interface backed by a **Directed Acyclic Graph (DAG) reasoning engine**, **hybrid RAG pipeline** (keyword + embedding + graph traversal), and **multi-provider LLM streaming** (Gemini, OpenAI-compatible, Anthropic).
+### Crystals (Documents)
 
-Everything runs on your machine. Projects are plain Markdown and JSON files on disk — no database, no cloud sync, fully inspectable.
+Your primary writing documents — chapters, scenes, drafts. They live in the sidebar under your project and support markdown with live preview, entity linking, and inline AI infill. When a crystal is active, the AI chat automatically includes it as context.
 
----
+### Artifacts (Wiki Entries)
 
-## Architecture Overview
+Your project encyclopedia — characters, locations, factions, items. Each artifact can have aliases so the AI recognizes different names. The retrieval system matches artifacts by title, alias, and semantic similarity, then injects them into the AI's context window.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  UI Layer (React 19 + Next.js App Router)                   │
-│  ┌──────────┬──────────────────┬──────────────┐             │
-│  │ Sidebar  │  Editor / DAG /  │   Comms      │             │
-│  │ (Dir)    │  Global Map      │   (Chat)     │             │
-│  └──────────┴──────────────────┴──────────────┘             │
-├─────────────────────────────────────────────────────────────┤
-│  API Layer (Next.js Route Handlers)                         │
-│  /api/chat  /api/timeline  /api/search  /api/network  ...   │
-├─────────────────────────────────────────────────────────────┤
-│  Context Engine                                             │
-│  ┌──────────┬──────────┬──────────┬──────────┬────────────┐ │
-│  │ Core     │ Keyword  │ Embed    │ Graph    │ Smart      │ │
-│  │ Canon    │ RAG      │ RAG      │ Traverse │ Windowing  │ │
-│  └──────────┴──────────┴──────────┴──────────┴────────────┘ │
-├─────────────────────────────────────────────────────────────┤
-│  LLM Providers (Gemini · OpenAI-compat · Anthropic)         │
-├─────────────────────────────────────────────────────────────┤
-│  Filesystem Persistence (Markdown + JSON, no DB)            │
-│  crystals/*.md  artifacts/*.md  timelines/*.json  chats/*   │
-└─────────────────────────────────────────────────────────────┘
-```
+### Timelines (DAG Canvas)
+
+Visual directed acyclic graphs for plotting stories or argument chains. Nodes represent events or plot points, edges represent relationships. Click a node to focus the AI's context on that node's upstream dependency chain. Use auto-synthesis to generate conclusions from multi-hop graph traversal.
+
+### Comms (Chat)
+
+Each crystal or timeline gets its own AI chat session bound to a glyph (AI persona). Chat supports three modes (Ask, Agent, Plan), branching conversations, file attachments, and prompt templates. The context engine assembles five RAG sources per message.
+
+### Glyphs (AI Personas)
+
+Configurable profiles that control model, provider, temperature, system prompt, and token limits. Glyphs come in two flavors:
+
+- **Sculpters** — entry-point personas shown in the comms picker. They run top-level sessions and can delegate to specialists.
+- **Specialists** — sub-agent templates not shown in the picker. A Sculpter can invoke them via `delegate_to_specialist` or `delegate_fan_out` tools in Agent mode. Define them precisely for tasks like research, continuity checking, or timeline management.
 
 ---
 
-## Core Systems
+## How It Works
 
-### 1. Terminal Interface
+### Architecture
 
+The following diagram shows how the UI, API, context engine, and storage layers connect. User actions in the three-pane interface flow down through API routes, context assembly (hybrid RAG), and into LLM providers, with all data persisted as plain files on disk.
 
-| Pane                   | Role                                                                                                                                                                                                                           |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Sidebar** (`DIR`)    | Project tree: `CRYSTAL_DB` (chapters w/ folders), `ARTIFACTS` (wiki), `TIMELINES` (DAG canvases). Drag-and-drop reordering, per-folder `[EXP]` export. System section at bottom: settings, glyphs, manuscript export.          |
-| **Editor** (`EDIT`)    | Split-pane Markdown editor + live preview. Debounced rendering (dynamic delay by word count). AI diff highlighting on appended content. Inline entity link suggestions with navigate / insert actions. Infill on selections.   |
-| **Comms** (`COMMS`)    | Streaming chat bound to a crystal or timeline. Branch navigation (fork/backtrack). Compact token budget display (`CTX: ~20.6k`, hover for full breakdown). Edit/delete messages. Saved prompt templates (`/`). Safety presets. |
-| **Global Network Map** | `d3-force` + `reactflow` physics graph of all entities. Click to preview, open, or explore relationships.                                                                                                                      |
-| **Command Palette**    | `Cmd+K` full-text search across crystals, artifacts, and timeline events. Focus trap, ARIA dialog semantics.                                                                                                                   |
+```mermaid
+flowchart TB
+    subgraph UI ["UI Layer"]
+        Sidebar["Sidebar<br/>Projects · Crystals · Artifacts · Timelines"]
+        Editor["Editor<br/>Markdown · Preview · Infill"]
+        DAG["DAG Canvas<br/>reactflow · Synthesis"]
+        Comms["Comms<br/>Chat · Modes · Branches"]
+    end
 
+    subgraph API ["API Layer"]
+        ChatAPI["/api/chat"]
+        TimelineAPI["/api/timeline"]
+        DocsAPI["/api/documents"]
+        WikiAPI["/api/wiki"]
+        GlyphsAPI["/api/glyphs"]
+    end
 
-- **Keyboard shortcuts**: `Cmd+K` search, `Cmd+1` focus editor, `Cmd+2` focus comms
-- **Inline forms**: All create/rename/delete actions use terminal-styled inline prompts (no browser dialogs)
-- **Styling**: Ultraviolet color scheme, Monaspace Neon body font with ligatures, CRT crosshair overlays, custom CSS animations
+    subgraph CTX ["Context Engine"]
+        Canon["Core Canon<br/>(always on)"]
+        Keyword["Keyword RAG<br/>(title/alias match)"]
+        Embed["Embedding RAG<br/>(cosine similarity)"]
+        Graph["Graph Traversal<br/>(BFS ≤ 10 hops)"]
+        Window["Smart Windowing<br/>(cursor-based chunks)"]
+    end
 
-### 2. DAG Reasoning Engine
+    subgraph LLM ["LLM Providers"]
+        Gemini["Gemini"]
+        OpenAI["OpenAI-compat"]
+        Anthropic["Anthropic"]
+    end
 
-Each **Timeline** is an independent DAG canvas (`reactflow`). Nodes and edges are stored as JSON.
+    subgraph FS ["Filesystem"]
+        Files["crystals/*.md<br/>artifacts/*.md<br/>timelines/*.json<br/>chats/*.json<br/>glyphs.json"]
+    end
 
-**Node types** (categorical):
-
-
-| Category  | Types                                  |
-| --------- | -------------------------------------- |
-| Narrative | `Event`, `Scene`, `Lore`               |
-| Technical | `Hypothesis`, `Evidence`, `Conclusion` |
-
-
-**Key capabilities**:
-
-- **Semantic edges**: Connect nodes via handles, then click the edge to label the relationship (`"Supports"`, `"Contradicts"`, `"Implements"`, etc.). Labels are injected into LLM context as `[Node A] --(Contradicts)--> [Node B]`.
-- **Full content passthrough**: Toggle `INJECT FULL CONTENT DOWNSTREAM` on a node to bypass summary truncation — the upstream node's full content is included in all downstream context.
-- **Auto-synthesis**: Click `[ AUTO_SYNTHESIZE ]` on any node. The engine BFS-traverses up to 10 hops upstream, collects content/summaries + edge semantics, and prompts the LLM to synthesize a conclusion.
-- **Reference nodes**: Drag a crystal or artifact from the sidebar onto the canvas. The new node carries a reference link and injects the source document's content into the graph context.
-- **Templates**: Predefined node/edge scaffolds for common patterns (narrative arcs, argument chains, etc.).
-- **Grid snapping, backspace delete, double-click to create**.
-
-### 3. Hybrid RAG Pipeline
-
-When a chat message is sent, the context engine assembles a prompt from five sources:
-
-
-| Source                      | Method                                     | Scope                                                                                                                          |
-| --------------------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| **Core Canon**              | Always injected                            | `loreBible` + `storyOutline` from project settings → system instruction                                                        |
-| **Keyword RAG**             | Title/alias substring matching             | Scans recent user messages + active document tail against all artifact titles and aliases                                      |
-| **Embedding RAG**           | Cosine similarity via `text-embedding-004` | Stored in `embeddings.json` per project; combined with keyword results for hybrid recall                                       |
-| **Graph Traversal RAG**     | BFS backward from focused DAG node         | Depth ≤ 10 hops. Full content for active node, summaries (or full if `passFullContent`) for ancestors, edge semantics included |
-| **Smart Context Windowing** | Cursor-position-based chunking             | For documents > 800 words: sends first 200 words + ~400 words around cursor + last 200 words instead of full content           |
-
-
-Token budget is computed during assembly and streamed to the client as a `__meta` JSON frame before the first content token.
-
-### 4. Multi-Provider LLM Support
-
-Each **Glyph** (AI persona) specifies provider, model, temperature, max tokens, and system instructions.
-
-
-| Provider              | Config                               | Notes                                                                  |
-| --------------------- | ------------------------------------ | ---------------------------------------------------------------------- |
-| **Gemini**            | `GEMINI_API_KEY`                     | Default. Uses `@google/genai` SDK. Embedding via `text-embedding-004`. |
-| **OpenAI-compatible** | `OPENAI_API_KEY` + `OPENAI_BASE_URL` | Any OpenAI-API-compatible endpoint (local models, Together, etc.)      |
-| **Anthropic**         | `ANTHROPIC_API_KEY`                  | Claude models via Anthropic SDK                                        |
-
-
-Provider abstraction lives in `src/lib/providers.ts`. Streaming is handled uniformly regardless of backend.
-
-### 5. Filesystem Persistence
-
-No database. Each project is a directory under the workspace root:
-
-```
-.workspace/
-├── glyphs.json                   # AI personas (workspace-wide)
-├── entity-index.json             # O(1) entity→project lookup cache
-└── <project-id>/
-    ├── project.json              # Name, loreBible, storyOutline
-    ├── folders.json              # Folder tree for crystals + artifacts
-    ├── crystals/
-    │   ├── <id>.md               # YAML frontmatter + Markdown body
-    │   └── .history/             # Auto-snapshots on save
-    ├── artifacts/
-    │   ├── <id>.md
-    │   └── .history/
-    ├── timelines/
-    │   └── <id>.json             # Nodes, edges, positions
-    ├── chats/
-    │   └── <id>.json             # Messages, branch tree, glyph binding
-    └── embeddings.json           # Vector cache for embedding RAG
+    UI --> API
+    API --> CTX
+    CTX --> LLM
+    API --> FS
 ```
 
-Documents use `gray-matter` for YAML frontmatter (title, folderId, orderIndex, aliases, timestamps) with Markdown body.
+### RAG Context Assembly
+
+Every chat message triggers a five-source context assembly pipeline. This is what makes the AI aware of your world, your draft, and your narrative structure — without you needing to manually @-mention anything.
+
+```mermaid
+flowchart LR
+    Msg["User message"] --> Canon["Core Canon<br/>loreBible + storyOutline"]
+    Msg --> KW["Keyword RAG<br/>title/alias substring match"]
+    Msg --> Emb["Embedding RAG<br/>cosine similarity"]
+    Msg --> DAG["Graph Traversal<br/>BFS from focused node"]
+    Msg --> Win["Smart Windowing<br/>cursor-region chunks"]
+    Canon --> Prompt["Assembled prompt"]
+    KW --> Prompt
+    Emb --> Prompt
+    DAG --> Prompt
+    Win --> Prompt
+    Prompt --> LLM["LLM generates response"]
+```
+
+### Chat Modes
+
+Three modes control how the AI interacts with your project, from read-only questions to full autonomous tool use.
+
+```mermaid
+flowchart LR
+    subgraph Ask ["Ask Mode"]
+        A1["Single-turn Q&A"]
+        A2["RAG context only"]
+        A3["No tools — read only"]
+    end
+
+    subgraph Agent ["Agent Mode"]
+        B1["Multi-turn tool loop<br/>(up to 20 iterations)"]
+        B2["17 tools: search, create,<br/>update, delete, resolve, delegate"]
+        B3["Risky actions need<br/>user confirmation"]
+    end
+
+    subgraph Plan ["Plan Mode"]
+        C1["Propose structured plan"]
+        C2["User reviews checklist"]
+        C3["Execute approved steps"]
+    end
+```
+
+### Sculpter → Specialist Delegation
+
+In Agent mode, a Sculpter glyph can delegate tasks to specialist sub-agents. Each specialist uses its own model, system prompt, and configuration. The inner loop runs autonomously with tool access, then returns results to the orchestrating Sculpter.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Sculpter as Sculpter (outer loop)
+    participant Tool as delegate_to_specialist
+    participant Spec as Specialist (inner loop)
+
+    User->>Sculpter: "Research all timeline references to the Red Spire"
+    Sculpter->>Tool: delegate_to_specialist(glyph_id, task)
+    Tool->>Spec: Spawns inner loop with specialist config
+    Spec->>Spec: search_artifacts("Red Spire")
+    Spec->>Spec: read_timeline(...)
+    Spec-->>Tool: Returns summary
+    Tool-->>Sculpter: Tool result with specialist output
+    Sculpter-->>User: Synthesized response
+```
+
+For parallel work, `delegate_fan_out` runs multiple specialists concurrently:
+
+```mermaid
+flowchart LR
+    S[Sculpter] --> D["delegate_fan_out"]
+    D --> R["Researcher specialist"]
+    D --> C["Continuity specialist"]
+    D --> T["Timeline specialist"]
+    R --> S
+    C --> S
+    T --> S
+```
+
+### Branching Chat
+
+Every user message can have multiple AI responses. Navigate between branches, regenerate, or fork to explore different directions. The full message tree is persisted to disk.
+
+```mermaid
+flowchart TD
+    U1["User: How should Act 2 open?"] --> M1a["Model response A"]
+    U1 --> M1b["Model response B (regen)"]
+    M1a --> U2["User: Expand on the storm scene"]
+    U2 --> M2["Model response"]
+    M1b --> U3["User: What about a flashback instead?"]
+    U3 --> M3["Model response"]
+```
 
 ---
 
-## Setup
+## Obsidian Compatibility
 
-### Prerequisites
+Rhyolite stores crystals and artifacts as human-readable Markdown files with YAML frontmatter. This means you can open any Rhyolite project as an Obsidian vault (or vice versa).
 
-- **Node.js** v18+
-- **Gemini API Key** (required). Optional: `OPENAI_BASE_URL` + `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`.
+### What works
 
-### Install
+- **Title-based filenames** — files are named `My Chapter.md` instead of `abc123.md`, so they're browsable in any file manager or Obsidian
+- **`[[Wikilinks]]`** — double-bracket links (`[[Character Name]]`, `[[Title|display text]]`) are rendered as clickable entity links in both apps
+- **YAML frontmatter** — Rhyolite stores its internal `id` in the frontmatter, which Obsidian displays in its Properties view
+- **`.rhyolite/` metadata** — project config lives in a dot-directory that Obsidian ignores
 
-```bash
-git clone https://github.com/7368697661/rhyolite.git
-cd rhyolite
-npm install
-cp .env.example .env   # add your GEMINI_API_KEY
-npm run dev             # → http://localhost:3000
+### Single-project mode
+
+Set `PROJECT_DIR=/path/to/your/vault` in `.env` and Rhyolite operates directly inside that folder — no multi-project nesting. Perfect for pointing at an existing Obsidian vault.
+
+### Open Folder
+
+From the project dropdown, choose **Open Folder...** to open a native OS folder picker. Rhyolite will register the folder directly in `known-projects.json` without using symlinks or moving files. Folder structures inside `crystals/` and `artifacts/` are dynamically scanned and map 1:1 to the OS filesystem, allowing true bidirectional sync with apps like Obsidian.
+
+### Templates (`_templates/`)
+
+If your project contains a `_templates/` folder (standard in Obsidian), Rhyolite automatically detects and loads those markdown templates. 
+- **Dead Link Resolver**: Automatically prioritizes a template named `Wiki_Page_Template.md` to structure generated artifacts.
+- **DAG Canvas**: When auto-synthesizing a node, you can select an available template from a dropdown to structure the AI's output.
+
+### Dead Link Resolver
+
+Click **Resolve [[links]]** in the document editor toolbar to scan the current crystal for `[[wikilinks]]` and Markdown links (`[display](<Target>)`) that don't have matching artifacts. Rhyolite runs a 3-stage specialist AI pipeline (Researcher → Writer → Auditor) with live streaming progress to create fully-fleshed, template-compliant articles using RAG context. This is also available as the `resolve_dead_links` tool in Agent mode.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Editor as Document Editor
+    participant API as resolve_dead_links
+    participant RAG as Embeddings
+    participant FS as fs-db
+
+    User->>Editor: Clicks "Resolve [[links]]"
+    Editor->>API: POST /api/documents/resolve-links
+    API->>FS: Read document content
+    API->>API: Extract all [[Title]] targets
+    API->>FS: Check each against existing entities
+    loop For each dead link
+        API->>RAG: retrieveSimilar(title)
+        API->>FS: writeWikiEntry(stub)
+    end
+    API-->>Editor: { created: [...], skipped: [...] }
 ```
-
-Set `WORKSPACE_DIR` in `.env` to customize where project data lives (defaults to `.workspace/` under repo root).
 
 ---
 
-## Usage
+## Example Workflows
 
-### Quick Start
+### Agent Mode: Expand a Timeline from an Outline
 
-1. Create or select a **project**.
-2. Set **Core Canon** (metaphysics, tone, hard rules) and **Story Outline** in Project Settings — these are always-on in the system prompt.
-3. Populate **Artifacts** with entities. Titles and aliases drive both keyword and embedding RAG — name things consistently.
-4. Write in **Crystals**. Each crystal has its own chat binding. Use `[entity name]` bracket syntax for internal links.
-5. Hover entity links for content previews. `Cmd+K` to search everything.
+1. Set chat to **Agent** mode.
+2. Prompt: *"Read the story outline and create timeline nodes for each major event in Act 1."*
+3. The AI calls `search_project` to find the outline, then `create_timeline_node` for each event, and `create_edge` to connect them in sequence.
+4. Review the result in the DAG canvas.
 
-### DAG Workflow
+### Plan Mode: Batch Artifact Updates
 
-1. Create a **Timeline** under `:: TIMELINES`.
-2. Open it — the center pane becomes the DAG canvas.
-3. Initialize **Comms** for the timeline (select a glyph, `[ INITIALIZE_UPLINK ]`).
-4. Build the graph: double-click to create nodes, connect handles, click edges to label relationships.
-5. Drag crystals/artifacts from the sidebar to create reference nodes.
-6. **Focus a node** (click it), then prompt in comms. The engine sees the full upstream context chain.
-7. Use `[ AUTO_SYNTHESIZE ]` on terminal nodes for automated multi-hop reasoning.
-8. `[+ DOC]` appends AI output to the linked crystal.
+1. Set chat to **Plan** mode.
+2. Prompt: *"Update all character artifacts to include their faction affiliation."*
+3. The AI proposes a plan: `search_artifacts` → `update_artifact` for each character.
+4. Review the checklist, uncheck any you want to skip, then execute.
 
-### Referencing Entities in Chat
+### Sculpter + Specialist: Chapter Continuity Pass
 
-There is no `@mention` syntax. The model sees artifacts whose **titles or aliases** appear as substrings in your recent messages + active document tail, plus semantically similar entries via embedding search. Name things consistently or add aliases in artifact metadata.
+1. Create a **specialist glyph** named "Continuity Checker" with a system prompt focused on finding inconsistencies against lore.
+2. In Agent mode with a Sculpter, prompt: *"Delegate to the continuity checker to review Chapter 3 against the lore bible."*
+3. The Sculpter calls `delegate_to_specialist` → the specialist reads the draft and artifacts, returns findings → the Sculpter synthesizes a report.
 
-### Markdown Features
+### Resolve Dead Links After Drafting
 
+1. Write a crystal with `[[wikilinks]]` to characters, locations, or concepts that don't exist yet.
+2. Click **Resolve [[links]]** in the editor toolbar.
+3. Rhyolite scans the document, identifies dead links, gathers RAG context for each, and creates stub artifacts.
+4. Edit the generated stubs to flesh them out.
 
-| Syntax                 | Behavior                                                                   |
-| ---------------------- | -------------------------------------------------------------------------- |
-| `[Title]`              | Resolves to internal crystal/artifact link (navigable, with hover preview) |
-| `[[Title]]`            | Same, alternative syntax                                                   |
-| `[Title](<TitleOrId>)` | Explicit link with custom display text                                     |
-| `> [!quote] ...`       | Renders as styled callout, hides the `[!quote]` marker                     |
+### Parallel Research with Fan-Out
 
+1. Create specialists for "Character Research" and "Location Research."
+2. Prompt: *"Fan out research: have the character specialist gather info on the protagonist, and the location specialist map all scenes set in the Undercity."*
+3. Both specialists run concurrently, each searching artifacts and timelines. Results return to the Sculpter for a combined summary.
 
-### Global Network Map
+---
 
-Open from the top bar (`[ GLOBAL_NETWORK ]`). Shows all entities as a physics-based graph.
+## Configuration
 
+### Environment Variables
 
-| Edge Color | Relationship                                         |
-| ---------- | ---------------------------------------------------- |
-| **Pink**   | Content links (bracket references between documents) |
-| **Violet** | Timeline DAG edges                                   |
-| **Amber**  | Event → Crystal/Artifact references                  |
-| **Teal**   | Event → Artifact tag connections                     |
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `GEMINI_API_KEY` | Yes | Google Gemini API key (default provider) |
+| `OPENAI_API_KEY` | No | OpenAI or compatible endpoint API key |
+| `OPENAI_BASE_URL` | No | Base URL for OpenAI-compatible APIs (local models, Together, etc.) |
+| `ANTHROPIC_API_KEY` | No | Anthropic Claude API key |
+| `WORKSPACE_DIR` | No | Custom workspace directory (defaults to `.workspace/`) |
+| `PROJECT_DIR` | No | Single-project mode — point directly at a folder (e.g. an Obsidian vault) |
 
+### Glyph Configuration (`glyphs.json`)
 
-Click a node to preview. Click empty space to deselect.
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Unique glyph identifier |
+| `name` | string | Display name |
+| `systemInstruction` | string | Base system prompt |
+| `provider` | `"gemini"` \| `"openai"` \| `"anthropic"` | LLM provider |
+| `model` | string | Model name (e.g. `gemini-2.5-flash`) |
+| `temperature` | number | Creativity (0–2) |
+| `maxOutputTokens` | number | Max response length |
+| `isSculpter` | boolean? | `true` (default) = shown in comms, `false` = specialist only |
+| `specialistRole` | string? | Optional role label (e.g. `researcher`, `continuity`) |
+
+---
+
+## Terminal Interface
+
+| Pane | Role |
+|------|------|
+| **Sidebar** (`DIR`) | Project tree: crystals, artifacts, timelines. Drag-and-drop reordering, per-folder export. |
+| **Editor** (`EDIT`) | Split-pane markdown editor with live preview, AI diff highlights, entity links, and inline infill. |
+| **Comms** (`COMMS`) | Streaming chat with mode switching, branch navigation, token budget display, and prompt templates. |
+| **DAG Canvas** | `reactflow` graph canvas with typed nodes, semantic edges, auto-synthesis, and reference nodes. |
+| **Global Network** | `d3-force` physics graph of all entities and relationships. |
+| **Command Palette** | `⌘K` full-text search across all project entities. |
 
 ---
 
@@ -280,140 +359,72 @@ erDiagram
   TimelineEvent }o--o{ Artifact : "tags"
 
   Glyph ||--o{ Chat : "persona"
+  Glyph {
+    boolean isSculpter "true = entry glyph"
+    string specialistRole "optional role tag"
+  }
 
   Chat ||--o{ ChatMessage : "messages"
   ChatMessage ||--o| ChatMessage : "branch (parent)"
 ```
 
-
-
 ---
 
-## System Graph
+## Filesystem Layout
 
-```mermaid
-graph TB
-  subgraph UI ["UI Layer"]
-    direction LR
-    SB["ProjectSidebar<br/>File tree · Drag/drop · Export"]
-    NAV["WorkspaceClient<br/>Navigation · History · Hotkeys"]
-    EDIT["DocumentEditorPane<br/>Editor · Preview · Diff · Entities"]
-    WIKI["WikiMarkdown<br/>Links · Callouts · Hover previews"]
-    DAG["TimelineCanvas<br/>reactflow DAG · Templates"]
-    COMMS["ChatThread<br/>Streaming · Branching · Tokens"]
-    MAP["GlobalMapCanvas<br/>d3-force · reactflow"]
-    CMD["CommandPalette<br/>Full-text search · Focus trap"]
-  end
-
-  subgraph API ["API Layer"]
-    direction LR
-    NET_API["/api/.../network"]
-    TL_API["/api/timeline"]
-    NODE_API["/api/timeline/nodes"]
-    SYNTH_API["/api/.../synthesize"]
-    TPL_API["/api/.../templates"]
-    CHAT_API["/api/chat"]
-    REGEN_API["/api/chat/regenerate"]
-    MSG_API["/api/chats/.../messages"]
-    DOC_API["/api/documents"]
-    WIKI_API["/api/wiki"]
-    SEARCH_API["/api/search"]
-    HIST_API["/api/history"]
-    ENT_API["/api/entities/suggest"]
-    PROMPT_API["/api/prompts"]
-    EXPORT_API["/api/.../export"]
-  end
-
-  subgraph CTX ["Context Engine"]
-    direction LR
-    DAGCTX["Graph Traversal<br/>BFS ≤ 10 hops"]
-    LEXRAG["Keyword RAG<br/>Title/alias match"]
-    EMBRAG["Embedding RAG<br/>text-embedding-004"]
-    CANON["Core Canon<br/>loreBible + storyOutline"]
-    DRAFT["Smart Windowing<br/>Cursor-based chunks"]
-    STREAM["Provider Streaming<br/>Gemini · OpenAI · Anthropic"]
-  end
-
-  subgraph FS ["Filesystem"]
-    direction LR
-    PROJ["project.json · folders.json"]
-    CRYS["crystals/*.md + .history/"]
-    ARTS["artifacts/*.md + .history/"]
-    TLNS["timelines/*.json"]
-    CHATS["chats/*.json"]
-    GLYPHS["glyphs.json"]
-    IDX["entity-index.json"]
-    EMBS["embeddings.json"]
-  end
-
-  SB -->|navigate| NAV
-  NAV --> EDIT
-  NAV --> DAG
-  NAV --> COMMS
-  NAV -->|GLOBAL_NETWORK| MAP
-  NAV -->|Cmd+K| CMD
-
-  EDIT --> WIKI
-  EDIT -->|suggestions| ENT_API
-  DAG -->|focus node| NODE_API
-  DAG -->|templates| TPL_API
-  MAP --> NET_API
-  CMD --> SEARCH_API
-
-  NET_API --> CRYS
-  NET_API --> ARTS
-  NET_API --> TLNS
-
-  TL_API --> TLNS
-  NODE_API --> TLNS
-  SYNTH_API --> TLNS
-  CHAT_API --> CHATS
-  REGEN_API --> CHATS
-  MSG_API --> CHATS
-  DOC_API --> CRYS
-  WIKI_API --> ARTS
-  EXPORT_API --> CRYS
-  HIST_API --> CRYS
-  HIST_API --> ARTS
-
-  NODE_API -->|activeNode| DAGCTX
-  DAGCTX --> CHAT_API
-  LEXRAG --> CHAT_API
-  EMBRAG --> CHAT_API
-  CANON --> CHAT_API
-  DRAFT --> CHAT_API
-  CHAT_API --> STREAM
-  SYNTH_API --> STREAM
-
-  COMMS -->|+DOC| DOC_API
-  COMMS -->|delete| MSG_API
-  COMMS -->|regen| REGEN_API
-  COMMS -->|templates| PROMPT_API
-  DAG --> TL_API
-  DAG -->|synthesize| SYNTH_API
-  SB -->|drag crystal/artifact| DAG
+```
+.workspace/                         
+├── glyphs.json                     # AI personas (workspace-wide)
+├── known-projects.json             # Registry of external folder paths
+└── <project-id>/                   # Can live anywhere on disk
+    ├── .rhyolite/
+    │   └── project.json            # Name, loreBible, storyOutline
+    ├── _templates/                 # (Optional) Markdown templates
+    ├── crystals/
+    │   ├── Subfolder/              # Subdirectories map natively to Rhyolite Folders
+    │   │   └── My Chapter.md       # Title-based filename, ID in YAML frontmatter
+    │   └── .history/               # Auto-snapshots on save
+    ├── artifacts/
+    │   ├── The Red Spire.md        # [[wikilinks]] work in both Rhyolite + Obsidian
+    │   └── .history/
+    ├── timelines/
+    │   └── <id>.json               # Nodes, edges, positions
+    ├── chats/
+    │   └── <id>.json               # Messages, branch tree, glyph binding
+    └── embeddings.json             # Vector cache for embedding RAG
 ```
 
-
+Files are fully compatible with Obsidian vaults — `.md` files use title-based filenames and store IDs in YAML frontmatter. Use `[[wikilinks]]` or `[Text](<Link>)` to cross-reference between crystals and artifacts. Folders map directly to the OS filesystem, replacing the old `folders.json` approach.
 
 ---
 
 ## Tech Stack
 
+| Layer | Technology |
+|-------|-----------|
+| Framework | Next.js 15 (App Router) + React 19 |
+| Language | TypeScript 5.x |
+| Styling | Tailwind CSS + custom keyframe animations |
+| Canvas | `reactflow` v11, `d3-force` |
+| Markdown | `react-markdown` + `remark-gfm` |
+| AI | `@google/genai`, OpenAI-compatible REST, `@anthropic-ai/sdk` |
+| Persistence | `fs/promises` + `gray-matter` (YAML frontmatter Markdown) |
+| Search | Token-based keyword matching + Gemini `text-embedding-004` embedding RAG (used in chat context AND agent tools) |
+| Validation | `zod` |
+| Fonts | Monaspace Neon (body), Cormorant Garamond (fallback), Fraunces (italics), Nightingale (headings) |
 
-| Layer       | Technology                                                                                       |
-| ----------- | ------------------------------------------------------------------------------------------------ |
-| Framework   | Next.js 15 (App Router) + React 19                                                               |
-| Language    | TypeScript 5.x                                                                                   |
-| Styling     | Tailwind CSS + custom keyframe animations                                                        |
-| Canvas      | `reactflow` v11, `d3-force`                                                                      |
-| Markdown    | `react-markdown` + `remark-gfm`                                                                  |
-| AI          | `@google/genai`, OpenAI-compatible REST, `@anthropic-ai/sdk`                                     |
-| Persistence | `fs/promises` + `gray-matter` (YAML frontmatter Markdown)                                        |
-| Search      | Custom full-text scoring + Gemini `text-embedding-004` embeddings                                |
-| Validation  | `zod`                                                                                            |
-| Fonts       | Monaspace Neon (body), Cormorant Garamond (fallback), Fraunces (italics), Nightingale (headings) |
+---
 
+## Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `⌘K` / `Ctrl+K` | Command palette (search everything) |
+| `⌘1` / `Ctrl+1` | Focus editor pane |
+| `⌘2` / `Ctrl+2` | Focus chat input |
+| `⌘⇧/` / `Ctrl+Shift+/` | Open documentation |
+| `Enter` | Send chat message |
+| `Shift+Enter` | New line in chat |
 
 ---
 

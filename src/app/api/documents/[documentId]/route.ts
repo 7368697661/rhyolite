@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { readDocument, writeDocument, deleteDocument, listProjects, listDocuments } from "@/lib/fs-db";
+import { readDocument, writeDocument, deleteDocument, listProjects, listDocuments, moveFileToFolder } from "@/lib/fs-db";
 import { embedSingleEntry } from "@/lib/embeddings";
 
 export const dynamic = "force-dynamic";
@@ -52,7 +52,10 @@ export async function PUT(
   if (parsed.data.title !== undefined) doc.title = parsed.data.title;
   if (parsed.data.content !== undefined) doc.content = parsed.data.content;
   if (parsed.data.orderIndex !== undefined) doc.orderIndex = parsed.data.orderIndex;
-  if (parsed.data.folderId !== undefined) doc.folderId = parsed.data.folderId;
+  if (parsed.data.folderId !== undefined && parsed.data.folderId !== doc.folderId) {
+    await moveFileToFolder(match.project.id, "document", doc.id, parsed.data.folderId);
+    doc.folderId = parsed.data.folderId;
+  }
   doc.updatedAt = new Date().toISOString();
 
   await writeDocument(doc);

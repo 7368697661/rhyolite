@@ -10,6 +10,8 @@ const GlyphUpdateSchema = z.object({
   model: z.string().optional(),
   temperature: z.number().min(0).max(2).optional(),
   maxOutputTokens: z.number().min(1).optional(),
+  isSculpter: z.boolean().optional(),
+  specialistRole: z.string().optional(),
 });
 
 export async function GET(req: Request, { params }: any) {
@@ -42,6 +44,8 @@ export async function PUT(req: Request, { params }: any) {
   if (parsed.data.model !== undefined) glyph.model = parsed.data.model;
   if (parsed.data.temperature !== undefined) glyph.temperature = parsed.data.temperature;
   if (parsed.data.maxOutputTokens !== undefined) glyph.maxOutputTokens = parsed.data.maxOutputTokens;
+  if (parsed.data.isSculpter !== undefined) glyph.isSculpter = parsed.data.isSculpter;
+  if (parsed.data.specialistRole !== undefined) glyph.specialistRole = parsed.data.specialistRole;
 
   await writeGlyphs(glyphs);
   return Response.json(glyph);

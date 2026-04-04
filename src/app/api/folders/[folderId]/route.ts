@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { readFolders, writeFolders } from "@/lib/fs-db";
+import { readFolders, renameFsFolder, deleteFsFolder, listProjects } from "@/lib/fs-db";
 
 export const dynamic = "force-dynamic";
 
@@ -7,22 +7,19 @@ const FolderUpdateSchema = z.object({
   name: z.string().min(1).optional(),
 });
 
-// Helper to find folder since we don't have projectId in URL
-import { listProjects } from "@/lib/fs-db";
-
 async function findFolderAndProject(folderId: string) {
   const projects = await listProjects();
   for (const p of projects) {
     const folders = await readFolders(p.id);
     const folder = folders.find((f) => f.id === folderId);
-    if (folder) return { project: p, folders, folder };
+    if (folder) return { project: p, folder };
   }
   return null;
 }
 
 export async function GET(req: Request, { params }: any) {
   const { folderId } = await params;
-  const match = await findFolderAndProject(folderId);
+  const match = await findFolderAndProject(decodeURIComponent(folderId));
   if (!match) return Response.json({ error: "Not found" }, { status: 404 });
   const f = match.folder;
   return Response.json({
@@ -34,6 +31,7 @@ export async function GET(req: Request, { params }: any) {
 
 export async function PUT(req: Request, { params }: any) {
   const { folderId } = await params;
+  const decodedId = decodeURIComponent(folderId);
   const json = await req.json().catch(() => null);
   const parsed = FolderUpdateSchema.safeParse(json);
   if (!parsed.success) {
@@ -43,13 +41,18 @@ export async function PUT(req: Request, { params }: any) {
     );
   }
 
-  const match = await findFolderAndProject(folderId);
+  const match = await findFolderAndProject(decodedId);
   if (!match) return Response.json({ error: "Not found" }, { status: 404 });
 
-  if (parsed.data.name !== undefined) match.folder.title = parsed.data.name;
-  match.folder.updatedAt = new Date().toISOString();
-
-  await writeFolders(match.project.id, match.folders);
+  if (parsed.data.name) {
+    const renamed = await renameFsFolder(match.project.id, decodedId, parsed.data.name);
+    if (!renamed) return Response.json({ error: "Failed to rename" }, { status: 500 });
+    return Response.json({
+      ...renamed,
+      name: renamed.title,
+      type: renamed.type ?? "document",
+    });
+  }
 
   const f = match.folder;
   return Response.json({
@@ -64,11 +67,12 @@ export async function DELETE(
   { params }: { params: Promise<{ folderId: string }> }
 ) {
   const { folderId } = await params;
-  const match = await findFolderAndProject(folderId);
+  const decodedId = decodeURIComponent(folderId);
+  const match = await findFolderAndProject(decodedId);
   if (!match) return Response.json({ error: "Not found" }, { status: 404 });
 
-  const updatedFolders = match.folders.filter((f) => f.id !== folderId);
-  await writeFolders(match.project.id, updatedFolders);
+  const ok = await deleteFsFolder(match.project.id, decodedId);
+  if (!ok) return Response.json({ error: "Failed to delete folder" }, { status: 500 });
 
   return Response.json({ ok: true });
 }

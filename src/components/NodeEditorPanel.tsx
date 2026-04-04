@@ -64,11 +64,23 @@ export default function NodeEditorPanel({
   };
 
   const [isExporting, setIsExporting] = useState(false);
+  const [templates, setTemplates] = useState<Array<{ name: string; filename: string }>>([]);
+  const [selectedTemplate, setSelectedTemplate] = useState<string>("");
+
+  useEffect(() => {
+    if (!projectId) return;
+    fetch(`/api/templates?projectId=${projectId}`)
+      .then((r) => r.json())
+      .then((data) => { if (Array.isArray(data)) setTemplates(data); })
+      .catch(() => {});
+  }, [projectId]);
 
   const handleSynthesize = async () => {
     setIsSynthesizing(true);
     const res = await fetch(`/api/timeline/nodes/${nodeId}/synthesize`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ templateFilename: selectedTemplate || undefined }),
     });
     if (res.ok) {
       const data = await res.json();
@@ -232,12 +244,27 @@ export default function NodeEditorPanel({
       </div>
 
       <div className="mt-4 flex flex-col gap-2 pt-4 border-t border-violet-800/60">
+        {templates.length > 0 && (
+          <div className="flex flex-col gap-1">
+            <label className="text-[10px] text-violet-600 uppercase tracking-widest">Template</label>
+            <select
+              className="bg-black border border-violet-900/50 p-2 text-violet-200 focus:border-violet-500 outline-none text-[10px]"
+              value={selectedTemplate}
+              onChange={(e) => setSelectedTemplate(e.target.value)}
+            >
+              <option value="">None (free-form synthesis)</option>
+              {templates.map((t) => (
+                <option key={t.filename} value={t.filename}>{t.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
         <button 
           onClick={handleSynthesize} 
           disabled={isSynthesizing} 
           className="border border-fuchsia-700/60 bg-fuchsia-950/40 text-fuchsia-500 py-1.5 hover:bg-fuchsia-900/60 uppercase tracking-widest text-[10px] font-bold disabled:opacity-50"
         >
-          {isSynthesizing ? "[ PROCESSING... ]" : "[ AUTO_SYNTHESIZE ]"}
+          {isSynthesizing ? "[ PROCESSING... ]" : selectedTemplate ? "[ SYNTHESIZE_WITH_TEMPLATE ]" : "[ AUTO_SYNTHESIZE ]"}
         </button>
 
         {!referenceId && (

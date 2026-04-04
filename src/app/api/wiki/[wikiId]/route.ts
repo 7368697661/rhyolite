@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { readWikiEntry, writeWikiEntry, deleteWikiEntry, listProjects, listWikiEntries } from "@/lib/fs-db";
+import { readWikiEntry, writeWikiEntry, deleteWikiEntry, listProjects, listWikiEntries, moveFileToFolder } from "@/lib/fs-db";
 import { embedSingleEntry } from "@/lib/embeddings";
 
 export const dynamic = "force-dynamic";
@@ -52,7 +52,10 @@ export async function PUT(
   if (parsed.data.title !== undefined) wiki.title = parsed.data.title;
   if (parsed.data.content !== undefined) wiki.content = parsed.data.content;
   if (parsed.data.aliases !== undefined) wiki.aliases = parsed.data.aliases;
-  if (parsed.data.folderId !== undefined) wiki.folderId = parsed.data.folderId;
+  if (parsed.data.folderId !== undefined && parsed.data.folderId !== wiki.folderId) {
+    await moveFileToFolder(match.project.id, "wiki", wiki.id, parsed.data.folderId);
+    wiki.folderId = parsed.data.folderId;
+  }
   wiki.updatedAt = new Date().toISOString();
 
   await writeWikiEntry(wiki);

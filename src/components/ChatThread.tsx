@@ -15,13 +15,158 @@ import {
   type BranchMessage,
 } from "@/lib/messageBranch";
 
+import type { ChatMode, NdjsonEvent } from "@/lib/streamTypes";
+
+type ToolCallDisplay = {
+  callId?: string;
+  name: string;
+  args: Record<string, unknown>;
+  result?: unknown;
+  ok?: boolean;
+};
+
+type PlanStep = {
+  tool: string;
+  args: Record<string, unknown>;
+  rationale: string;
+  approved?: boolean;
+};
+
+type StreamError = { code: string; message: string; retryAfter?: number };
+
+type PendingConfirm = {
+  loopId: string;
+  name: string;
+  args: Record<string, unknown>;
+  reason: string;
+  callId?: string;
+};
+
+type SubAgentBlock = {
+  glyphId: string;
+  glyphName: string;
+  text: string;
+  done: boolean;
+};
+
 type ChatMessage = {
   id: string;
   role: "user" | "model";
   content: string;
+  reasoningContent?: string;
+  toolCalls?: Array<{
+    name: string;
+    args: Record<string, unknown>;
+    result: unknown;
+    ok: boolean;
+    confirmed?: boolean;
+  }>;
+  errors?: Array<{ code: string; message: string }>;
   createdAt: string;
   parentMessageId: string | null;
 };
+
+const REASONING_STORAGE_KEY = "rhyolite-comms-reasoning";
+const MODE_STORAGE_KEY = "rhyolite-comms-mode";
+
+/** After the first `__meta` line, server sends NDJSON events. */
+async function consumeCommsSseStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  handlers: {
+    onTokenBudget: (b: TokenBudget) => void;
+    onContentDelta: (s: string) => void;
+    onReasoningDelta: (s: string) => void;
+    onToolCall?: (tc: ToolCallDisplay) => void;
+    onToolResult?: (tr: { callId?: string; name: string; result: unknown; ok: boolean }) => void;
+    onConfirm?: (c: PendingConfirm) => void;
+    onPlanProposal?: (steps: PlanStep[]) => void;
+    onError?: (e: StreamError) => void;
+    onStatus?: (s: string) => void;
+    onSubAgent?: (d: { phase: "start" | "delta" | "end"; glyphId: string; glyphName: string; text?: string }) => void;
+  }
+) {
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let metaParsed = false;
+
+  function processLine(trimmed: string) {
+    if (!trimmed) return;
+    try {
+      const o = JSON.parse(trimmed) as NdjsonEvent;
+      switch (o.t) {
+        case "r":
+          handlers.onReasoningDelta(o.d);
+          break;
+        case "c":
+          handlers.onContentDelta(o.d);
+          break;
+        case "tc":
+          handlers.onToolCall?.({ callId: o.d.callId, name: o.d.name, args: o.d.args });
+          break;
+        case "tr":
+          handlers.onToolResult?.({ callId: o.d.callId, name: o.d.name, result: o.d.result, ok: o.d.ok });
+          break;
+        case "confirm":
+          handlers.onConfirm?.(o.d);
+          break;
+        case "tp":
+          handlers.onPlanProposal?.(o.d.map((s: any) => ({ tool: s.tool, args: s.args, rationale: s.rationale })));
+          break;
+        case "e":
+          handlers.onError?.(o.d);
+          break;
+        case "s":
+          handlers.onStatus?.(o.d);
+          break;
+        case "sub":
+          handlers.onSubAgent?.(o.d);
+          break;
+      }
+    } catch {
+      /* ignore bad line */
+    }
+  }
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    buffer += decoder.decode(value, { stream: true });
+
+    if (!metaParsed) {
+      const nlIdx = buffer.indexOf("\n");
+      if (nlIdx === -1) continue;
+      const firstLine = buffer.slice(0, nlIdx);
+      buffer = buffer.slice(nlIdx + 1);
+      if (firstLine.startsWith('{"__meta":')) {
+        try {
+          const meta = JSON.parse(firstLine) as {
+            __meta?: boolean;
+            tokenBudget?: TokenBudget;
+          };
+          if (meta.__meta && meta.tokenBudget) {
+            handlers.onTokenBudget(meta.tokenBudget);
+          }
+        } catch {
+          /* malformed meta */
+        }
+      }
+      metaParsed = true;
+    }
+
+    let idx: number;
+    while ((idx = buffer.indexOf("\n")) !== -1) {
+      const line = buffer.slice(0, idx);
+      buffer = buffer.slice(idx + 1);
+      processLine(line.trim());
+    }
+  }
+
+  const tail = buffer.trim();
+  if (tail && metaParsed) {
+    processLine(tail);
+  }
+}
 
 type TokenBudget = {
   canon: number;
@@ -138,6 +283,290 @@ const Markdown = React.memo(function Markdown({ content }: { content: string }) 
   );
 });
 
+function ReasoningBlock({
+  text,
+  autoExpandWhileStreaming,
+}: {
+  text: string;
+  autoExpandWhileStreaming?: boolean;
+}) {
+  const [open, setOpen] = useState(!!autoExpandWhileStreaming);
+  useEffect(() => {
+    if (autoExpandWhileStreaming) setOpen(true);
+  }, [autoExpandWhileStreaming, text]);
+  if (!text.trim()) return null;
+  return (
+    <div className="mb-2 border border-violet-900/60 bg-black/70">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="w-full px-2 py-1.5 text-left text-[9px] font-mono uppercase tracking-[0.2em] text-violet-500 hover:bg-violet-950/50"
+      >
+        {open ? "[−] " : "[+] "}
+        Reasoning
+      </button>
+      {open ? (
+        <pre className="max-h-52 overflow-y-auto whitespace-pre-wrap border-t border-violet-900/40 px-2 py-2 text-[10px] font-mono leading-relaxed text-violet-500/90">
+          {text}
+        </pre>
+      ) : null}
+    </div>
+  );
+}
+
+function ToolCallCard({ tc }: { tc: ToolCallDisplay }) {
+  const [open, setOpen] = useState(false);
+  const statusIcon = tc.result === undefined
+    ? "⏳"
+    : tc.ok
+      ? "✓"
+      : "✗";
+  const statusColor = tc.result === undefined
+    ? "text-violet-500"
+    : tc.ok
+      ? "text-emerald-400"
+      : "text-red-400";
+
+  return (
+    <div className="my-1 border border-violet-800/60 bg-violet-950/30">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-[10px] font-mono uppercase tracking-wider text-violet-400 hover:bg-violet-950/50"
+      >
+        <span className={statusColor}>{statusIcon}</span>
+        <span className="text-violet-300">[TOOL]</span>
+        <span className="text-violet-200">{tc.name}</span>
+        <span className="ml-auto text-violet-700">{open ? "▾" : "▸"}</span>
+      </button>
+      {open && (
+        <div className="border-t border-violet-800/40 px-2 py-1.5">
+          <div className="text-[9px] font-mono uppercase text-violet-600 mb-1">Args</div>
+          <pre className="text-[10px] font-mono text-violet-400 max-h-32 overflow-auto whitespace-pre-wrap">
+            {JSON.stringify(tc.args, null, 2)}
+          </pre>
+          {tc.result !== undefined && (
+            <>
+              <div className="text-[9px] font-mono uppercase text-violet-600 mt-2 mb-1">Result</div>
+              <pre className={`text-[10px] font-mono max-h-32 overflow-auto whitespace-pre-wrap ${tc.ok ? "text-emerald-400/80" : "text-red-400/80"}`}>
+                {typeof tc.result === "string" ? tc.result : JSON.stringify(tc.result, null, 2)}
+              </pre>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ErrorBanner({ error }: { error: StreamError }) {
+  const isRateLimit = error.code === "rate_limited";
+  return (
+    <div className={`my-1 border px-3 py-2 text-[10px] font-mono ${
+      isRateLimit
+        ? "border-amber-700/60 bg-amber-950/30 text-amber-300"
+        : "border-red-700/60 bg-red-950/30 text-red-300"
+    }`}>
+      <span className="font-bold uppercase">[{error.code}]</span>{" "}
+      {error.message}
+      {isRateLimit && error.retryAfter && (
+        <span className="ml-2 text-amber-500">
+          (retry in ~{error.retryAfter}s)
+        </span>
+      )}
+    </div>
+  );
+}
+
+function ConfirmPrompt({
+  confirm,
+  onRespond,
+}: {
+  confirm: PendingConfirm;
+  onRespond: (loopId: string, approved: boolean) => void;
+}) {
+  return (
+    <div className="my-1 border border-amber-600/60 bg-amber-950/20 px-3 py-2">
+      <div className="text-[10px] font-bold uppercase tracking-wider text-amber-400 mb-1">
+        ⚠ Confirmation Required
+      </div>
+      <div className="text-[10px] font-mono text-amber-200 mb-1">
+        <span className="text-amber-400">{confirm.name}</span>({Object.keys(confirm.args).join(", ")})
+      </div>
+      <div className="text-[10px] text-amber-300/80 mb-2">{confirm.reason}</div>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => onRespond(confirm.loopId, true)}
+          className="border border-emerald-600/60 bg-emerald-950/40 px-3 py-1 text-[10px] font-bold uppercase tracking-wide text-emerald-300 hover:border-emerald-400"
+        >
+          Approve
+        </button>
+        <button
+          type="button"
+          onClick={() => onRespond(confirm.loopId, false)}
+          className="border border-red-600/60 bg-red-950/40 px-3 py-1 text-[10px] font-bold uppercase tracking-wide text-red-300 hover:border-red-400"
+        >
+          Reject
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PlanChecklist({
+  steps,
+  onExecute,
+  isExecuting,
+}: {
+  steps: PlanStep[];
+  onExecute: (approved: PlanStep[]) => void;
+  isExecuting: boolean;
+}) {
+  const [checkedMap, setCheckedMap] = useState<Record<number, boolean>>(
+    () => Object.fromEntries(steps.map((_, i) => [i, true]))
+  );
+
+  const toggle = (i: number) =>
+    setCheckedMap((m) => ({ ...m, [i]: !m[i] }));
+
+  const selectedSteps = steps.filter((_, i) => checkedMap[i]);
+
+  return (
+    <div className="my-1 border border-violet-700/60 bg-violet-950/20 px-3 py-2">
+      <div className="text-[10px] font-bold uppercase tracking-wider text-violet-400 mb-2">
+        Proposed Plan ({steps.length} steps)
+      </div>
+      <div className="space-y-1">
+        {steps.map((step, i) => (
+          <label key={i} className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={checkedMap[i] ?? true}
+              onChange={() => toggle(i)}
+              disabled={isExecuting}
+              className="mt-0.5 accent-violet-500"
+            />
+            <div className="flex-1">
+              <div className="text-[10px] font-mono text-violet-300">
+                <span className="text-violet-500">{step.tool}</span>
+                ({Object.keys(step.args).join(", ")})
+              </div>
+              <div className="text-[10px] text-violet-500 italic">{step.rationale}</div>
+            </div>
+          </label>
+        ))}
+      </div>
+      <div className="flex gap-2 mt-2">
+        <button
+          type="button"
+          onClick={() => onExecute(selectedSteps)}
+          disabled={isExecuting || selectedSteps.length === 0}
+          className="border border-emerald-600/60 bg-emerald-950/40 px-3 py-1 text-[10px] font-bold uppercase tracking-wide text-emerald-300 hover:border-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {isExecuting ? "Executing..." : `Execute ${selectedSteps.length} steps`}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SubAgentCard({ block }: { block: SubAgentBlock }) {
+  const [open, setOpen] = useState(!block.done);
+  useEffect(() => {
+    if (!block.done) setOpen(true);
+  }, [block.done, block.text]);
+
+  return (
+    <div className="my-1 border border-cyan-800/60 bg-cyan-950/20">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-[10px] font-mono uppercase tracking-wider text-cyan-400 hover:bg-cyan-950/40"
+      >
+        <span className={block.done ? "text-emerald-400" : "text-cyan-500 animate-pulse"}>
+          {block.done ? "✓" : "◆"}
+        </span>
+        <span className="text-cyan-300">[SUB-AGENT]</span>
+        <span className="text-cyan-200">{block.glyphName}</span>
+        <span className="ml-auto text-cyan-700">{open ? "▾" : "▸"}</span>
+      </button>
+      {open && block.text && (
+        <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap border-t border-cyan-800/40 px-2 py-1.5 text-[10px] font-mono leading-relaxed text-cyan-400/80">
+          {block.text}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+function StatusMessage({ text }: { text: string }) {
+  return (
+    <div className="my-0.5 text-[9px] font-mono uppercase tracking-wider text-violet-600 px-2">
+      ◆ {text}
+    </div>
+  );
+}
+
+function HistoricToolCalls({ calls }: { calls: ChatMessage["toolCalls"] }) {
+  if (!calls || calls.length === 0) return null;
+  return (
+    <div className="mt-1 space-y-0.5">
+      {calls.map((tc, i) => (
+        <ToolCallCard
+          key={i}
+          tc={{
+            name: tc.name,
+            args: tc.args,
+            result: tc.result,
+            ok: tc.ok,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function GlyphPicker({
+  glyphs,
+  glyphId,
+  onChangeGlyph,
+}: {
+  glyphs: { id: string; name: string; isSculpter?: boolean }[];
+  glyphId: string;
+  onChangeGlyph: (id: string) => void | Promise<void>;
+}) {
+  const sculpters = glyphs.filter((g) => g.isSculpter !== false);
+  const currentGlyph = glyphs.find((g) => g.id === glyphId);
+  const currentIsSpecialist = currentGlyph?.isSculpter === false;
+  const options = currentIsSpecialist && !sculpters.find((g) => g.id === glyphId)
+    ? [...sculpters, currentGlyph!]
+    : sculpters;
+
+  return (
+    <>
+      <select
+        value={glyphId}
+        onChange={(e) => onChangeGlyph(e.target.value)}
+        className="max-w-[120px] truncate bg-transparent border border-violet-800/70 text-violet-300 text-[10px] uppercase tracking-wider outline-none p-0.5"
+      >
+        {options.map((g) => (
+          <option key={g.id} value={g.id} className="bg-black">
+            {g.name}{g.isSculpter === false ? " (specialist)" : ""}
+          </option>
+        ))}
+      </select>
+      {currentIsSpecialist && (
+        <span className="text-[8px] text-cyan-600 tracking-wider" title="This session uses a specialist glyph. Switch to a Sculpter for the standard comms list.">
+          SPEC
+        </span>
+      )}
+    </>
+  );
+}
+
+const MODES: ChatMode[] = ["ask", "agent", "plan"];
+
 const messageBody =
   "w-full whitespace-pre-wrap px-3 py-3 text-xs font-body leading-relaxed text-violet-100/90 md:px-4";
 
@@ -180,6 +609,19 @@ const MessageRow = React.memo(function MessageRow({
               : "text-violet-200 [text-shadow:0_0_12px_rgba(167,139,250,0.12)]"
           }
         >
+          {!isUser && m.reasoningContent ? (
+            <ReasoningBlock text={m.reasoningContent} />
+          ) : null}
+          {!isUser && m.toolCalls?.length ? (
+            <HistoricToolCalls calls={m.toolCalls} />
+          ) : null}
+          {!isUser && m.errors?.length ? (
+            <div className="mt-1 space-y-0.5">
+              {m.errors.map((e, i) => (
+                <ErrorBanner key={i} error={e} />
+              ))}
+            </div>
+          ) : null}
           <Markdown content={m.content} />
         </div>
       </div>
@@ -319,15 +761,17 @@ export default function ChatThread({
   onChangeGlyph,
   projectId,
   cursorPosition,
+  onWorkspaceRefresh,
 }: {
   chatId: string;
   activeTimelineEventId?: string | null;
   onAppendToDocument?: (text: string) => void;
   glyphId?: string;
-  glyphs?: { id: string; name: string }[];
+  glyphs?: { id: string; name: string; isSculpter?: boolean }[];
   onChangeGlyph?: (id: string) => void | Promise<void>;
   projectId?: string | null;
   cursorPosition?: number;
+  onWorkspaceRefresh?: () => void;
 }) {
   const [allMessages, setAllMessages] = useState<ChatMessage[]>([]);
   const [activeTipMessageId, setActiveTipMessageId] = useState<string | null>(
@@ -339,9 +783,52 @@ export default function ChatThread({
 
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
-  const [streamDraft, setStreamDraft] = useState("");
+  const [streamContent, setStreamContent] = useState("");
+  const [streamReasoning, setStreamReasoning] = useState("");
   const [streamRole, setStreamRole] = useState<"chat" | "regen" | null>(null);
-  
+
+  const [enableReasoning, setEnableReasoning] = useState(false);
+  const [chatMode, setChatMode] = useState<ChatMode>("ask");
+
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem(REASONING_STORAGE_KEY);
+      setEnableReasoning(v === "1" || v === "true");
+      const m = localStorage.getItem(MODE_STORAGE_KEY) as ChatMode | null;
+      if (m && MODES.includes(m)) setChatMode(m);
+    } catch {
+      /* private mode */
+    }
+  }, []);
+
+  const toggleEnableReasoning = useCallback(() => {
+    setEnableReasoning((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(REASONING_STORAGE_KEY, next ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
+
+  const switchMode = useCallback((m: ChatMode) => {
+    setChatMode(m);
+    try {
+      localStorage.setItem(MODE_STORAGE_KEY, m);
+    } catch { /* ignore */ }
+  }, []);
+
+  // Agent-mode streaming state
+  const [streamToolCalls, setStreamToolCalls] = useState<ToolCallDisplay[]>([]);
+  const [streamErrors, setStreamErrors] = useState<StreamError[]>([]);
+  const [streamStatuses, setStreamStatuses] = useState<string[]>([]);
+  const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
+  const [planProposal, setPlanProposal] = useState<PlanStep[] | null>(null);
+  const [isExecutingPlan, setIsExecutingPlan] = useState(false);
+  const [subAgentBlocks, setSubAgentBlocks] = useState<SubAgentBlock[]>([]);
+
   const [safetyPreset, setSafetyPreset] = useState<"none" | "low" | "medium" | "high">("none");
   const [estimatedTokens, setEstimatedTokens] = useState<number>(0);
   const [tokenBudget, setTokenBudget] = useState<TokenBudget | null>(null);
@@ -471,7 +958,13 @@ export default function ChatThread({
     if (isAutoScroll) {
       endRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     }
-  }, [displayPath.length, isStreaming, streamDraft, isAutoScroll]);
+  }, [
+    displayPath.length,
+    isStreaming,
+    streamContent,
+    streamReasoning,
+    isAutoScroll,
+  ]);
 
   async function persistBranchSwitch(
     nextChoices: Record<string, string>,
@@ -612,7 +1105,14 @@ export default function ChatThread({
     setAttachments([]);
     setIsStreaming(true);
     setStreamRole("chat");
-    setStreamDraft("");
+    setStreamContent("");
+    setStreamReasoning("");
+    setStreamToolCalls([]);
+    setStreamErrors([]);
+    setStreamStatuses([]);
+    setPendingConfirm(null);
+    setPlanProposal(null);
+    setSubAgentBlocks([]);
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -628,6 +1128,8 @@ export default function ChatThread({
           continuedFromModelMessageId: continuedFromModelMessageId ?? null,
           safetyPreset,
           cursorPosition,
+          enableReasoning,
+          mode: chatMode,
           attachments: snapshotAttachments.map((a) => ({
             filename: a.filename,
             mimeType: a.mimeType,
@@ -643,46 +1145,46 @@ export default function ChatThread({
       }
 
       const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-
-      let modelText = "";
-      let metaParsed = false;
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        if (!value) continue;
-
-        const chunkText = decoder.decode(value, { stream: true });
-        if (!chunkText) continue;
-
-        modelText += chunkText;
-
-        if (!metaParsed) {
-          const nlIdx = modelText.indexOf("\n");
-          if (nlIdx === -1) continue;
-          const firstLine = modelText.slice(0, nlIdx);
-          if (firstLine.startsWith('{"__meta":')) {
-            try {
-              const meta = JSON.parse(firstLine);
-              if (meta.__meta && meta.tokenBudget) {
-                setTokenBudget(meta.tokenBudget);
-              }
-            } catch { /* malformed meta */ }
-            modelText = modelText.slice(nlIdx + 1);
-          }
-          metaParsed = true;
-        }
-
-        setStreamDraft(modelText);
-      }
+      await consumeCommsSseStream(reader, {
+        onTokenBudget: setTokenBudget,
+        onContentDelta: (s) => setStreamContent((c) => c + s),
+        onReasoningDelta: (s) => setStreamReasoning((r) => r + s),
+        onToolCall: (tc) => setStreamToolCalls((prev) => [...prev, tc]),
+        onToolResult: (tr) =>
+          setStreamToolCalls((prev) =>
+            prev.map((tc) =>
+              tc.callId === tr.callId || (tc.name === tr.name && tc.result === undefined)
+                ? { ...tc, result: tr.result, ok: tr.ok }
+                : tc
+            )
+          ),
+        onConfirm: (c) => setPendingConfirm(c),
+        onPlanProposal: (steps) => setPlanProposal(steps),
+        onError: (e) => setStreamErrors((prev) => [...prev, e]),
+        onStatus: (s) => setStreamStatuses((prev) => [...prev, s]),
+        onSubAgent: (d) => {
+          setSubAgentBlocks((prev) => {
+            if (d.phase === "start") return [...prev, { glyphId: d.glyphId, glyphName: d.glyphName, text: "", done: false }];
+            if (d.phase === "end") return prev.map((b) => b.glyphId === d.glyphId && !b.done ? { ...b, done: true } : b);
+            if (d.phase === "delta" && d.text) return prev.map((b) => b.glyphId === d.glyphId && !b.done ? { ...b, text: b.text + d.text } : b);
+            return prev;
+          });
+        },
+      });
     } catch {
       // aborted / network
     } finally {
       abortControllerRef.current = null;
       setIsStreaming(false);
       setStreamRole(null);
-      setStreamDraft("");
+      setStreamContent("");
+      setStreamReasoning("");
+      setStreamToolCalls([]);
+      setStreamStatuses([]);
+      setPendingConfirm(null);
+      setSubAgentBlocks([]);
       await loadMessages().catch(() => {});
+      if (chatMode !== "ask") onWorkspaceRefresh?.();
     }
   }
 
@@ -691,7 +1193,14 @@ export default function ChatThread({
 
     setIsStreaming(true);
     setStreamRole("regen");
-    setStreamDraft("");
+    setStreamContent("");
+    setStreamReasoning("");
+    setStreamToolCalls([]);
+    setStreamErrors([]);
+    setStreamStatuses([]);
+    setPendingConfirm(null);
+    setPlanProposal(null);
+    setSubAgentBlocks([]);
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -700,7 +1209,13 @@ export default function ChatThread({
       const res = await fetch("/api/chat/regenerate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chatId, activeTimelineEventId, safetyPreset }),
+        body: JSON.stringify({
+          chatId,
+          activeTimelineEventId,
+          safetyPreset,
+          enableReasoning,
+          mode: chatMode,
+        }),
         signal: controller.signal,
       });
 
@@ -709,48 +1224,58 @@ export default function ChatThread({
       }
 
       const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-
-      let modelText = "";
-      let metaParsed = false;
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        if (!value) continue;
-
-        const chunkText = decoder.decode(value, { stream: true });
-        if (!chunkText) continue;
-
-        modelText += chunkText;
-
-        if (!metaParsed) {
-          const nlIdx = modelText.indexOf("\n");
-          if (nlIdx === -1) continue;
-          const firstLine = modelText.slice(0, nlIdx);
-          if (firstLine.startsWith('{"__meta":')) {
-            try {
-              const meta = JSON.parse(firstLine);
-              if (meta.__meta && meta.tokenBudget) {
-                setTokenBudget(meta.tokenBudget);
-              }
-            } catch { /* malformed meta */ }
-            modelText = modelText.slice(nlIdx + 1);
-          }
-          metaParsed = true;
-        }
-
-        setStreamDraft(modelText);
-      }
+      await consumeCommsSseStream(reader, {
+        onTokenBudget: setTokenBudget,
+        onContentDelta: (s) => setStreamContent((c) => c + s),
+        onReasoningDelta: (s) => setStreamReasoning((r) => r + s),
+        onToolCall: (tc) => setStreamToolCalls((prev) => [...prev, tc]),
+        onToolResult: (tr) =>
+          setStreamToolCalls((prev) =>
+            prev.map((tc) =>
+              tc.callId === tr.callId || (tc.name === tr.name && tc.result === undefined)
+                ? { ...tc, result: tr.result, ok: tr.ok }
+                : tc
+            )
+          ),
+        onConfirm: (c) => setPendingConfirm(c),
+        onPlanProposal: (steps) => setPlanProposal(steps),
+        onError: (e) => setStreamErrors((prev) => [...prev, e]),
+        onStatus: (s) => setStreamStatuses((prev) => [...prev, s]),
+        onSubAgent: (d) => {
+          setSubAgentBlocks((prev) => {
+            if (d.phase === "start") return [...prev, { glyphId: d.glyphId, glyphName: d.glyphName, text: "", done: false }];
+            if (d.phase === "end") return prev.map((b) => b.glyphId === d.glyphId && !b.done ? { ...b, done: true } : b);
+            if (d.phase === "delta" && d.text) return prev.map((b) => b.glyphId === d.glyphId && !b.done ? { ...b, text: b.text + d.text } : b);
+            return prev;
+          });
+        },
+      });
     } catch {
       // ignore
     } finally {
       abortControllerRef.current = null;
       setIsStreaming(false);
       setStreamRole(null);
-      setStreamDraft("");
+      setStreamContent("");
+      setStreamReasoning("");
+      setStreamToolCalls([]);
+      setStreamStatuses([]);
+      setPendingConfirm(null);
+      setSubAgentBlocks([]);
       await loadMessages().catch(() => {});
+      if (chatMode !== "ask") onWorkspaceRefresh?.();
     }
-  }, [isStreaming, lastUserOnPath, chatId, activeTimelineEventId, safetyPreset, loadMessages]);
+  }, [
+    isStreaming,
+    lastUserOnPath,
+    chatId,
+    chatMode,
+    activeTimelineEventId,
+    safetyPreset,
+    enableReasoning,
+    loadMessages,
+    onWorkspaceRefresh,
+  ]);
 
   function onStop() {
     abortControllerRef.current?.abort();
@@ -818,20 +1343,36 @@ export default function ChatThread({
         <div className="flex items-center gap-2 min-w-0">
           <span className="shrink-0 text-[10px] font-bold text-violet-500">&gt;_</span>
           {glyphs && glyphs.length > 0 && glyphId && onChangeGlyph ? (
-            <select
-              value={glyphId}
-              onChange={(e) => onChangeGlyph(e.target.value)}
-              className="max-w-[120px] truncate bg-transparent border border-violet-800/70 text-violet-300 text-[10px] uppercase tracking-wider outline-none p-0.5"
-            >
-              {glyphs.map((g) => (
-                <option key={g.id} value={g.id} className="bg-black">
-                  {g.name}
-                </option>
-              ))}
-            </select>
+            <GlyphPicker glyphs={glyphs} glyphId={glyphId} onChangeGlyph={onChangeGlyph} />
           ) : (
             <span className="text-[10px] text-violet-800">// comms</span>
           )}
+          <button
+            type="button"
+            onClick={toggleEnableReasoning}
+            disabled={isStreaming}
+            title="Opt-in: request provider reasoning/thinking when supported (extra tokens & latency)."
+            className="shrink-0 border border-violet-800/70 bg-black px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wider text-violet-400 hover:border-violet-600 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Reasoning: {enableReasoning ? "ON" : "OFF"}
+          </button>
+          <div className="flex shrink-0 border border-violet-800/70 bg-black">
+            {MODES.map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => switchMode(m)}
+                disabled={isStreaming}
+                className={`px-1.5 py-0.5 text-[9px] font-mono uppercase tracking-wider disabled:cursor-not-allowed disabled:opacity-40 ${
+                  chatMode === m
+                    ? "bg-violet-800/50 text-violet-100"
+                    : "text-violet-500 hover:text-violet-300"
+                }`}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
         </div>
         <TokenBudgetDisplay budget={tokenBudget} estimate={estimatedTokens} />
       </div>
@@ -842,8 +1383,15 @@ export default function ChatThread({
         className="min-h-0 flex-1 overflow-y-auto"
       >
         {displayPath.length === 0 && !isStreaming ? (
-        <div className="border-b border-violet-900/50 px-3 py-4 text-[10px] uppercase tracking-wider text-violet-800 font-mono">
-          No traffic — send to open channel.
+        <div className="border-b border-violet-900/50 px-3 py-4 text-center">
+          <div className="text-[10px] uppercase tracking-wider text-violet-700 font-mono mb-1">
+            No messages yet
+          </div>
+          <div className="text-[9px] text-violet-800 leading-relaxed max-w-xs mx-auto">
+            {chatMode === "ask" && "Ask mode — Type a question. The AI uses your project context (crystals, artifacts, lore) to answer."}
+            {chatMode === "agent" && "Agent mode — The AI can search, create, and modify your project using tools. Risky actions require your approval."}
+            {chatMode === "plan" && "Plan mode — The AI will propose a plan of actions for you to review and approve before execution."}
+          </div>
         </div>
         ) : null}
 
@@ -870,22 +1418,107 @@ export default function ChatThread({
             );
           })}
 
-          {isStreaming && streamDraft ? (
+          {isStreaming && (streamContent || streamReasoning || streamToolCalls.length > 0 || streamErrors.length > 0 || pendingConfirm || planProposal || streamStatuses.length > 0 || subAgentBlocks.length > 0) ? (
             <div className={messageBody}>
               <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-violet-600">
-                Model
+                Model {chatMode !== "ask" && <span className="text-violet-800">({chatMode})</span>}
               </div>
               <div className="text-violet-200 [text-shadow:0_0_12px_rgba(167,139,250,0.12)]">
-                <Markdown content={streamDraft} />
+                {streamReasoning ? (
+                  <ReasoningBlock
+                    text={streamReasoning}
+                    autoExpandWhileStreaming
+                  />
+                ) : null}
+                {streamToolCalls.map((tc, i) => (
+                  <ToolCallCard key={tc.callId ?? i} tc={tc} />
+                ))}
+                {subAgentBlocks.map((block, i) => (
+                  <SubAgentCard key={`${block.glyphId}-${i}`} block={block} />
+                ))}
+                {streamStatuses.length > 0 && (
+                  <StatusMessage text={streamStatuses[streamStatuses.length - 1]} />
+                )}
+                {streamErrors.map((e, i) => (
+                  <ErrorBanner key={i} error={e} />
+                ))}
+                {pendingConfirm && (
+                  <ConfirmPrompt
+                    confirm={pendingConfirm}
+                    onRespond={async (loopId, approved) => {
+                      setPendingConfirm(null);
+                      await fetch("/api/chat/confirm", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ loopId, approved }),
+                      });
+                    }}
+                  />
+                )}
+                {planProposal && (
+                  <PlanChecklist
+                    steps={planProposal}
+                    isExecuting={isExecutingPlan}
+                    onExecute={async (approved) => {
+                      setIsExecutingPlan(true);
+                      try {
+                        const res = await fetch("/api/chat/execute-plan", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            projectId,
+                            steps: approved,
+                          }),
+                        });
+                        if (res.ok && res.body) {
+                          const reader = res.body.getReader();
+                          await consumeCommsSseStream(reader, {
+                            onTokenBudget: () => {},
+                            onContentDelta: (s) => setStreamContent((c) => c + s),
+                            onReasoningDelta: () => {},
+                            onToolCall: (tc) => setStreamToolCalls((prev) => [...prev, tc]),
+                            onToolResult: (tr) =>
+                              setStreamToolCalls((prev) =>
+                                prev.map((tc) =>
+                                  tc.callId === tr.callId || (tc.name === tr.name && tc.result === undefined)
+                                    ? { ...tc, result: tr.result, ok: tr.ok }
+                                    : tc
+                                )
+                              ),
+                            onStatus: (s) => setStreamStatuses((prev) => [...prev, s]),
+                            onError: (e) => setStreamErrors((prev) => [...prev, e]),
+                          });
+                        }
+                      } catch { /* ignore */ }
+                      setIsExecutingPlan(false);
+                      setPlanProposal(null);
+                      await loadMessages().catch(() => {});
+                    }}
+                  />
+                )}
+                {streamContent ? <Markdown content={streamContent} /> : null}
               </div>
             </div>
           ) : null}
 
-          {isStreaming && !streamDraft && streamRole ? (
+          {isStreaming && !streamContent && !streamReasoning && streamToolCalls.length === 0 && streamErrors.length === 0 && !pendingConfirm && !planProposal && streamStatuses.length === 0 && subAgentBlocks.length === 0 && streamRole ? (
             <div className="border-b border-violet-900/50 px-3 py-3 text-xs uppercase tracking-wider text-violet-700">
               Processing…
             </div>
           ) : null}
+
+          {!isStreaming && streamErrors.length > 0 && (
+            <div className={messageBody}>
+              <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-red-500">
+                Agent Error
+              </div>
+              <div>
+                {streamErrors.map((e, i) => (
+                  <ErrorBanner key={i} error={e} />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div ref={endRef} />

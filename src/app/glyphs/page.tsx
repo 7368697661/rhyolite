@@ -11,6 +11,8 @@ type Glyph = {
   model: string;
   temperature: number;
   maxOutputTokens: number;
+  isSculpter?: boolean;
+  specialistRole?: string;
 };
 
 export default function GlyphsPage() {
@@ -26,6 +28,7 @@ export default function GlyphsPage() {
   async function handleSave(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
+    const isSculpterRaw = fd.get("isSculpter");
     const payload = {
       name: fd.get("name") as string,
       systemInstruction: fd.get("systemInstruction") as string,
@@ -33,6 +36,8 @@ export default function GlyphsPage() {
       model: fd.get("model") as string,
       temperature: parseFloat(fd.get("temperature") as string) || 0.7,
       maxOutputTokens: parseInt(fd.get("maxOutputTokens") as string, 10) || 2048,
+      isSculpter: isSculpterRaw === "on" || isSculpterRaw === "true",
+      specialistRole: (fd.get("specialistRole") as string) || undefined,
     };
 
     if (editing) {
@@ -198,6 +203,36 @@ export default function GlyphsPage() {
                     className="w-full border border-violet-700/50 bg-black px-3 py-2 text-sm text-violet-100 outline-none focus:border-violet-400 focus:shadow-uv-glow"
                   />
                 </div>
+                <div className="border-t border-violet-800/40 pt-3 mt-1 flex flex-col gap-3">
+                  <label className="flex items-center gap-3 cursor-pointer group/toggle">
+                    <input
+                      key={`sculpter-${editing?.id || "new"}`}
+                      type="checkbox"
+                      name="isSculpter"
+                      defaultChecked={editing ? editing.isSculpter !== false : true}
+                      className="accent-violet-500 h-4 w-4"
+                    />
+                    <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-violet-500 group-hover/toggle:text-violet-300 transition-colors">
+                      Sculpter (show in comms)
+                    </span>
+                  </label>
+                  <p className="text-[9px] uppercase tracking-widest text-violet-700 -mt-1 pl-7">
+                    Uncheck to make this a specialist — a sub-agent template invoked via delegation only.
+                    Dead link resolver uses: <span className="text-cyan-700">researcher</span>, <span className="text-cyan-700">writer</span>, <span className="text-cyan-700">auditor</span>
+                  </p>
+                  <div>
+                    <label className="mb-1 block text-[10px] font-bold uppercase tracking-[0.2em] text-violet-600">
+                      &gt; Specialist role tag
+                    </label>
+                    <input
+                      key={`role-${editing?.id || "new"}`}
+                      name="specialistRole"
+                      defaultValue={editing?.specialistRole}
+                      placeholder="e.g. researcher, writer, auditor"
+                      className="w-full border border-violet-700/50 bg-black px-3 py-2 text-sm text-violet-100 outline-none focus:border-violet-400 focus:shadow-uv-glow placeholder:text-violet-800"
+                    />
+                  </div>
+                </div>
               </div>
             </div>
             <div className="mt-1 flex flex-wrap gap-2">
@@ -230,6 +265,14 @@ export default function GlyphsPage() {
                 <div className="flex items-center gap-2">
                   <span className="text-violet-500 opacity-50 font-bold">&gt;</span>
                   <h3 className="font-heading text-base font-bold text-violet-100 uppercase tracking-wider">{g.name}</h3>
+                  <span className={`text-[8px] font-bold uppercase tracking-widest px-1.5 py-0.5 border ${g.isSculpter === false ? "border-cyan-700/60 text-cyan-500 bg-cyan-950/30" : "border-violet-700/60 text-violet-400 bg-violet-950/30"}`}>
+                    {g.isSculpter === false ? "SPECIALIST" : "SCULPTER"}
+                  </span>
+                  {g.specialistRole && (
+                    <span className="text-[8px] font-bold uppercase tracking-widest text-violet-600">
+                      [{g.specialistRole}]
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button

@@ -10,6 +10,8 @@ const GlyphCreateSchema = z.object({
   model: z.string().optional(),
   temperature: z.number().min(0).max(2).optional(),
   maxOutputTokens: z.number().min(1).optional(),
+  isSculpter: z.boolean().optional(),
+  specialistRole: z.string().optional(),
 });
 
 export async function GET() {
@@ -34,6 +36,8 @@ export async function POST(req: Request) {
     model: parsed.data.model || "gemini-2.5-flash",
     temperature: parsed.data.temperature || 0.7,
     maxOutputTokens: parsed.data.maxOutputTokens || 2048,
+    isSculpter: parsed.data.isSculpter ?? true,
+    specialistRole: parsed.data.specialistRole,
   };
   glyphs.push(glyph);
   await writeGlyphs(glyphs);

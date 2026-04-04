@@ -74,10 +74,10 @@ Return ONLY the replacement text. Do not include introductory phrases. Ensure th
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        for await (const delta of deltas) {
-          if (!delta) continue;
-          fullText += delta;
-          controller.enqueue(encoder.encode(delta));
+        for await (const chunk of deltas) {
+          if (!chunk?.text || chunk.channel !== "content") continue;
+          fullText += chunk.text;
+          controller.enqueue(encoder.encode(chunk.text));
         }
       } catch (e) {
         controller.error(e);

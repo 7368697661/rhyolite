@@ -4,6 +4,7 @@ import {
   HarmBlockThreshold,
   type SafetySetting,
 } from "@google/genai";
+import type { StreamChunk } from "./streamTypes";
 
 type GeminiRole = "user" | "model";
 type GeminiInlineData = { data: string; mimeType: string };
@@ -68,12 +69,37 @@ export function getSafetySettings(preset: SafetyPreset): SafetySetting[] {
   }
 }
 
+export type { StreamChunk } from "./streamTypes";
+
+/** Simple non-streaming text generation for short tasks like stub creation. */
+export async function generateGeminiText(params: {
+  model?: string;
+  systemInstruction?: string;
+  prompt: string;
+  maxOutputTokens?: number;
+  temperature?: number;
+}): Promise<string> {
+  const ai = getGeminiClient();
+  const model = params.model || process.env.GEMINI_MODEL || "gemini-2.0-flash";
+  const res = await ai.models.generateContent({
+    model,
+    contents: [{ role: "user" as GeminiRole, parts: [{ text: params.prompt }] }],
+    config: {
+      systemInstruction: params.systemInstruction,
+      temperature: params.temperature ?? 0.7,
+      maxOutputTokens: params.maxOutputTokens ?? 1024,
+      safetySettings: DEFAULT_SAFETY_SETTINGS,
+    },
+  });
+  return res.text ?? "";
+}
+
 /**
- * Streams generated text deltas (not the full accumulated string).
+ * Streams generated text as content-channel chunks, or reasoning + content when
+ * `enableReasoning` is true (thinking-capable Gemini models).
  *
- * Note: `@google/genai` streaming provides `GenerateContentResponse.text` as the
- * concatenation of text parts. We compute deltas by comparing against the
- * previously accumulated output.
+ * Without thinking: `GenerateContentResponse.text` is treated as cumulative text;
+ * we yield content-channel deltas by comparing to the previous aggregate.
  */
 export async function streamGeminiText(params: {
   model: string;
@@ -83,7 +109,8 @@ export async function streamGeminiText(params: {
   maxOutputTokens?: number;
   abortSignal?: AbortSignal;
   safetySettings?: SafetySetting[];
-}): Promise<AsyncGenerator<string>> {
+  enableReasoning?: boolean;
+}): Promise<AsyncGenerator<StreamChunk>> {
   const ai = getGeminiClient();
 
   const stream = await ai.models.generateContentStream({
@@ -95,29 +122,82 @@ export async function streamGeminiText(params: {
       maxOutputTokens: params.maxOutputTokens,
       abortSignal: params.abortSignal,
       safetySettings: params.safetySettings ?? DEFAULT_SAFETY_SETTINGS,
-    }
+      ...(params.enableReasoning
+        ? { thinkingConfig: { includeThoughts: true } }
+        : {}),
+    },
   });
 
-  async function* deltas() {
-    let accumulated = "";
-    for await (const chunk of stream) {
-      const chunkText = chunk.text ?? "";
-      if (!chunkText) continue;
+  async function* deltas(): AsyncGenerator<StreamChunk> {
+    if (!params.enableReasoning) {
+      let accumulated = "";
+      for await (const chunk of stream) {
+        const chunkText = chunk.text ?? "";
+        if (!chunkText) continue;
 
-      let delta: string;
-      if (accumulated && chunkText.startsWith(accumulated)) {
-        delta = chunkText.slice(accumulated.length);
-      } else if (!accumulated) {
-        delta = chunkText;
-      } else if (chunkText.includes(accumulated)) {
-        delta = chunkText.slice(accumulated.length);
-      } else {
-        // Fallback: treat the entire chunk as new text.
-        delta = chunkText;
+        let delta: string;
+        if (accumulated && chunkText.startsWith(accumulated)) {
+          delta = chunkText.slice(accumulated.length);
+        } else if (!accumulated) {
+          delta = chunkText;
+        } else if (chunkText.includes(accumulated)) {
+          delta = chunkText.slice(accumulated.length);
+        } else {
+          delta = chunkText;
+        }
+
+        accumulated += delta;
+        if (delta) yield { channel: "content", text: delta };
+      }
+      return;
+    }
+
+    // Thinking models: branch on `part.thought` per streamed parts.
+    let thoughtAcc = "";
+    let contentAcc = "";
+
+    for await (const chunk of stream) {
+      const parts = chunk.candidates?.[0]?.content?.parts ?? [];
+      if (parts.length > 0) {
+        for (const part of parts) {
+          const raw = part.text ?? "";
+          if (!raw) continue;
+          const channel = part.thought ? ("reasoning" as const) : ("content" as const);
+          const prev = channel === "reasoning" ? thoughtAcc : contentAcc;
+          let delta: string;
+          if (prev && raw.startsWith(prev)) {
+            delta = raw.slice(prev.length);
+          } else if (!prev) {
+            delta = raw;
+          } else if (raw.includes(prev)) {
+            delta = raw.slice(prev.length);
+          } else {
+            delta = raw;
+          }
+          if (channel === "reasoning") {
+            thoughtAcc = prev + delta;
+          } else {
+            contentAcc = prev + delta;
+          }
+          if (delta) yield { channel, text: delta };
+        }
+        continue;
       }
 
-      accumulated += delta;
-      if (delta) yield delta;
+      const chunkText = chunk.text ?? "";
+      if (!chunkText) continue;
+      let delta: string;
+      if (contentAcc && chunkText.startsWith(contentAcc)) {
+        delta = chunkText.slice(contentAcc.length);
+      } else if (!contentAcc) {
+        delta = chunkText;
+      } else if (chunkText.includes(contentAcc)) {
+        delta = chunkText.slice(contentAcc.length);
+      } else {
+        delta = chunkText;
+      }
+      contentAcc += delta;
+      if (delta) yield { channel: "content", text: delta };
     }
   }
 

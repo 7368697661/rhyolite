@@ -69,6 +69,11 @@ export default function DocumentEditorPane({
 
   // Entity link suggestions
   const [entitySuggestions, setEntitySuggestions] = useState<EntitySuggestion[]>([]);
+  
+  // Resolve dead links state
+  const [isResolvingLinks, setIsResolvingLinks] = useState(false);
+  const [resolveResult, setResolveResult] = useState<{ message: string; created: string[] } | null>(null);
+  const [resolveProgress, setResolveProgress] = useState<{ message: string; current?: number; total?: number } | null>(null);
 
   const activeDoc =
     activeItem?.type === "document"
@@ -164,6 +169,112 @@ export default function DocumentEditorPane({
     const newContent = before + linked + after;
     setContent(newContent);
     handleSave(newContent);
+  };
+
+  const handleResolveLinks = async () => {
+    if (!itemData || (activeItem?.type !== "document" && activeItem?.type !== "wiki")) return;
+    setIsResolvingLinks(true);
+    setResolveResult(null);
+    setResolveProgress({ message: "Checking for dead links..." });
+    
+    try {
+      // 1. Dry run to get count
+      const dryRes = await fetch("/api/documents/resolve-links", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          document_id: itemData.id,
+          project_id: itemData.projectId,
+          dry_run: true,
+        }),
+      });
+      
+      const dryData = await dryRes.json();
+      if (!dryData.ok) {
+        throw new Error(dryData.error || "Failed to check links");
+      }
+      
+      const count = dryData.data?.dead_links?.length || 0;
+      if (count === 0) {
+        setResolveResult({ message: "No dead links found", created: [] });
+        setIsResolvingLinks(false);
+        setResolveProgress(null);
+        return;
+      }
+      
+      // Warning for large number of links
+      if (!confirm(`Found ${count} dead link(s). Generating articles takes time (about 20-40 seconds per link).\n\nProceed with generation?`)) {
+        setIsResolvingLinks(false);
+        setResolveProgress(null);
+        return;
+      }
+
+      setResolveProgress({ message: "Starting generation...", current: 0, total: count });
+
+      // 2. Real run with stream parsing
+      const res = await fetch("/api/documents/resolve-links", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          document_id: itemData.id,
+          project_id: itemData.projectId,
+          dry_run: false,
+        }),
+      });
+
+      if (!res.body) throw new Error("No response body");
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      
+      let finalMessage = "Resolve complete";
+      let finalCreated: string[] = [];
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || ""; // Keep the last incomplete line in buffer
+        
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const event = JSON.parse(line);
+            if (event.type === "progress") {
+              setResolveProgress({
+                message: event.data.message || event.data.step,
+                current: event.data.current,
+                total: event.data.total,
+              });
+            } else if (event.type === "result") {
+              if (event.data.ok && event.data.data) {
+                finalMessage = event.data.data.message || finalMessage;
+                finalCreated = event.data.data.created || [];
+              } else {
+                finalMessage = event.data.error || "Failed to resolve";
+              }
+            } else if (event.type === "error") {
+              finalMessage = event.error || "Error during resolution";
+            }
+          } catch (e) {
+            console.error("Failed to parse ndjson line", e);
+          }
+        }
+      }
+
+      setResolveResult({ message: finalMessage, created: finalCreated });
+      if (finalCreated.length > 0) {
+        onReloadProjectData();
+      }
+    } catch (err: any) {
+      setResolveResult({ message: err.message || "Network error", created: [] });
+    } finally {
+      setIsResolvingLinks(false);
+      setResolveProgress(null);
+    }
   };
 
   const resolveEntityPreview = useCallback((entityTitle: string) => {
@@ -417,8 +528,12 @@ export default function DocumentEditorPane({
 
   if (!activeItem || !itemData) {
     return (
-      <div className="flex h-full items-center justify-center border-b border-violet-900/50 px-4 text-sm text-violet-700">
-        <p>Select a crystal or artifact to start writing.</p>
+      <div className="flex h-full flex-col items-center justify-center border-b border-violet-900/50 px-6 text-center">
+        <div className="text-violet-700 text-lg mb-2">◇</div>
+        <p className="text-sm text-violet-600 font-bold uppercase tracking-wider mb-2">No item selected</p>
+        <p className="text-[10px] text-violet-700 max-w-sm leading-relaxed">
+          Select a <strong className="text-violet-500">crystal</strong> (document/chapter) or <strong className="text-violet-500">artifact</strong> (wiki entry) from the sidebar to begin writing. Crystals are your narrative drafts; artifacts are your world encyclopedia.
+        </p>
       </div>
     );
   }
@@ -468,6 +583,36 @@ export default function DocumentEditorPane({
           </h2>
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 text-xs text-violet-500">
+          {(activeItem?.type === "document" || activeItem?.type === "wiki") && !isResolvingLinks && (
+            <button
+              type="button"
+              onClick={() => handleResolveLinks()}
+              className="border border-violet-700/60 bg-black px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-violet-300 hover:border-violet-500 hover:text-violet-100"
+              title="Find dead [[wikilinks]] and create stub artifacts for them"
+            >
+              Resolve [[links]]
+            </button>
+          )}
+          {isResolvingLinks && (
+            <div className="flex flex-col items-start gap-1">
+              <span className="animate-pulse text-[10px] text-violet-400 uppercase tracking-wide">
+                {resolveProgress?.message || "Resolving..."}
+              </span>
+              {resolveProgress?.total && resolveProgress.total > 0 && (
+                <div className="flex items-center gap-2">
+                  <div className="h-1 w-24 bg-violet-950 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-violet-500 transition-all duration-300" 
+                      style={{ width: `${Math.min(100, Math.max(0, ((resolveProgress.current || 0) / resolveProgress.total) * 100))}%` }}
+                    />
+                  </div>
+                  <span className="text-[9px] text-violet-500 font-mono">
+                    {resolveProgress.current || 0}/{resolveProgress.total}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
           {selection && !isInfilling && !extractPromptOpen && (
             <>
               <button
@@ -491,6 +636,21 @@ export default function DocumentEditorPane({
           )}
         </div>
       </div>
+
+      {resolveResult && (
+        <div className="border-b border-violet-600/40 px-5 py-2 flex items-center justify-between text-[10px] font-mono">
+          <span className={resolveResult.created.length > 0 ? "text-emerald-400" : "text-violet-400"}>
+            {resolveResult.message}
+          </span>
+          <button
+            type="button"
+            onClick={() => setResolveResult(null)}
+            className="text-violet-600 hover:text-violet-300 ml-4"
+          >
+            dismiss
+          </button>
+        </div>
+      )}
 
       {extractPromptOpen && selection && (
         <div className="border-b border-violet-600/40 px-5 py-2">

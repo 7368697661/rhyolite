@@ -15,6 +15,9 @@ import { retrieveSimilar } from "@/lib/embeddings";
 import { windowDraftContent } from "@/lib/draftWindowing";
 import { findChatScope } from "../chats/scope";
 import { getGlyph, writeChat, generateId, type FsChat, type FsChatMessage } from "@/lib/fs-db";
+import { runAgentLoop } from "@/lib/agentLoop";
+import { buildToolCatalogSummary } from "@/lib/agentTools";
+import type { ChatMode, NdjsonEvent } from "@/lib/streamTypes";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +31,10 @@ type ChatMessageInput = {
   safetyPreset?: SafetyPreset;
   continuedFromModelMessageId?: string | null;
   cursorPosition?: number;
+  /** When true, request provider-native reasoning where supported (NDJSON r/c stream). */
+  enableReasoning?: boolean;
+  /** Chat mode: ask (default), agent (tools), or plan (propose-then-execute). */
+  mode?: ChatMode;
   attachments?: Array<{
     filename: string;
     mimeType: string;
@@ -268,16 +275,9 @@ export async function POST(req: Request) {
     content: c.parts.map((p: any) => p.text ?? "").join(""),
   }));
 
-  const deltas = await streamModel({
-    provider: (glyph as any).provider ?? "gemini",
-    model: glyph.model,
-    systemInstruction,
-    messages: flatMessages,
-    temperature: glyph.temperature,
-    maxOutputTokens: glyph.maxOutputTokens,
-    abortSignal,
-    safetyPreset: body.safetyPreset ?? "none",
-  });
+  const enableReasoning = body.enableReasoning === true;
+  const mode: ChatMode = body.mode ?? "ask";
+  const provider = (glyph as any).provider ?? "gemini";
 
   const tokenBudget = {
     canon: Math.ceil(systemInstruction.length / 3.5),
@@ -293,22 +293,133 @@ export async function POST(req: Request) {
     tokenBudget.canon + tokenBudget.wiki + tokenBudget.dag +
     tokenBudget.draft + tokenBudget.history;
 
-  let fullText = "";
-
   const projectId = chatScope!.projectId;
+
+  // Mode-specific system prompt augmentation
+  if (mode === "agent") {
+    systemInstruction += `\n\n---\n[AGENT MODE]\nYou are an autonomous agent with access to project tools. Actively use tools to accomplish the user's request — search, read, create, and modify project entities as needed. If a search returns few results, try broader queries or different keywords. Do NOT stop after a single search; explore further until you have enough context to respond fully. Always prefer using tools over guessing.`;
+  } else if (mode === "plan") {
+    const catalog = buildToolCatalogSummary();
+    systemInstruction += `\n\n---\n[PLAN MODE]\nYou MUST respond by calling the propose_plan tool with a structured plan. Do NOT respond with plain text — always use the propose_plan tool.\n\nHere are the tools you can include in your plan:\n${catalog}\n\nEach step in your plan should specify which tool to use, with what arguments, and a brief rationale. Order the steps logically. The user will review and approve the plan before any actions are executed.`;
+  }
+
+  if (mode === "agent" || mode === "plan") {
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        controller.enqueue(
+          encoder.encode(JSON.stringify({ __meta: true, tokenBudget, mode }) + "\n")
+        );
+
+        const loopResult = await runAgentLoop(
+          {
+            provider,
+            model: glyph.model,
+            systemInstruction,
+            messages: flatMessages,
+            temperature: glyph.temperature,
+            maxOutputTokens: glyph.maxOutputTokens,
+            abortSignal,
+            safetyPreset: body.safetyPreset ?? "none",
+            enableReasoning,
+            mode,
+            glyphId,
+            toolContext: {
+              projectId,
+              timelineId: chat.timelineId ?? null,
+              documentId: chat.documentId ?? null,
+            },
+          },
+          (event: NdjsonEvent) => {
+            controller.enqueue(encoder.encode(JSON.stringify(event) + "\n"));
+          }
+        );
+
+        try {
+          const trimmed = loopResult.content.trim();
+          if (trimmed || loopResult.toolCalls.length > 0 || loopResult.errors.length > 0) {
+            const modelMsg: FsChatMessage = {
+              id: generateId(),
+              chatId: chat.id,
+              role: "model",
+              content: loopResult.content,
+              ...(loopResult.reasoningContent.trim()
+                ? { reasoningContent: loopResult.reasoningContent }
+                : {}),
+              ...(loopResult.toolCalls.length > 0
+                ? { toolCalls: loopResult.toolCalls }
+                : {}),
+              ...(loopResult.errors.length > 0
+                ? { errors: loopResult.errors }
+                : {}),
+              parentMessageId: userMsg.id,
+              createdAt: new Date().toISOString(),
+            };
+
+            chat.messages.push(modelMsg);
+
+            const all = chat.messages as BranchMessage[];
+            const choices = parseBranchChoices(chat.branchChoicesJson);
+            choices[userMsg.id] = modelMsg.id;
+            const kids = childrenByParent(all);
+            const newTip = extendTipFromModel(modelMsg.id, kids, choices);
+
+            chat.activeTipMessageId = newTip;
+            chat.branchChoicesJson = serializeBranchChoices(choices);
+            chat.updatedAt = new Date().toISOString();
+
+            await writeChat(projectId, chat);
+          }
+        } catch { /* ignore persistence errors */ }
+        controller.close();
+      },
+      cancel() {},
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+      },
+    });
+  }
+
+  // Ask mode: single-pass streaming (existing behavior)
+  const deltas = await streamModel({
+    provider,
+    model: glyph.model,
+    systemInstruction,
+    messages: flatMessages,
+    temperature: glyph.temperature,
+    maxOutputTokens: glyph.maxOutputTokens,
+    abortSignal,
+    safetyPreset: body.safetyPreset ?? "none",
+    enableReasoning,
+  });
+
+  let fullContent = "";
+  let fullReasoning = "";
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       controller.enqueue(
         encoder.encode(
-          JSON.stringify({ __meta: true, tokenBudget }) + "\n"
+          JSON.stringify({ __meta: true, tokenBudget, mode }) + "\n"
         )
       );
       try {
-        for await (const delta of deltas) {
-          if (!delta) continue;
-          fullText += delta;
-          controller.enqueue(encoder.encode(delta));
+        for await (const chunk of deltas) {
+          if (!chunk?.text) continue;
+          if (chunk.channel === "reasoning") {
+            fullReasoning += chunk.text;
+            controller.enqueue(
+              encoder.encode(JSON.stringify({ t: "r", d: chunk.text }) + "\n")
+            );
+          } else {
+            fullContent += chunk.text;
+            controller.enqueue(
+              encoder.encode(JSON.stringify({ t: "c", d: chunk.text }) + "\n")
+            );
+          }
         }
       } catch (err) {
         if (!abortSignal.aborted) {
@@ -316,13 +427,16 @@ export async function POST(req: Request) {
         }
       } finally {
         try {
-          const trimmed = fullText.trim();
+          const trimmed = fullContent.trim();
           if (trimmed) {
             const modelMsg: FsChatMessage = {
               id: generateId(),
               chatId: chat.id,
               role: "model",
-              content: fullText,
+              content: fullContent,
+              ...(fullReasoning.trim()
+                ? { reasoningContent: fullReasoning }
+                : {}),
               parentMessageId: userMsg.id,
               createdAt: new Date().toISOString(),
             };

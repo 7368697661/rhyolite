@@ -50,6 +50,8 @@ export default function ProjectSidebar({
 }) {
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
+  const [isOpeningFolder, setIsOpeningFolder] = useState(false);
+  const [openFolderError, setOpenFolderError] = useState<string | null>(null);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [dragOverFolder, setDragOverFolder] = useState<{
     type: "document" | "wiki";
@@ -99,6 +101,41 @@ export default function ProjectSidebar({
       setNewProjectName("");
       setIsCreatingProject(false);
       onReloadProjects();
+    }
+  };
+
+  const handleOpenFolder = async () => {
+    setOpenFolderError(null);
+    setIsOpeningFolder(true);
+
+    try {
+      const pickRes = await fetch("/api/projects/pick-folder", { method: "POST" });
+      const pickData = await pickRes.json();
+
+      if (pickData.cancelled || !pickData.path) {
+        setIsOpeningFolder(false);
+        return;
+      }
+
+      const res = await fetch("/api/projects/open", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: pickData.path }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setIsOpeningFolder(false);
+        onReloadProjects();
+        if (data.id) onSelectProject(data.id);
+      } else {
+        const err = await res.json().catch(() => ({ error: "Failed to open folder" }));
+        setOpenFolderError(err.error || "Failed to open folder");
+        setIsOpeningFolder(false);
+      }
+    } catch {
+      setOpenFolderError("Failed to open folder picker");
+      setIsOpeningFolder(false);
     }
   };
 
@@ -490,25 +527,33 @@ export default function ProjectSidebar({
             </button>
           </form>
         ) : (
-          <div className="flex items-center gap-2">
-            <select
-              className="flex-1 truncate border border-violet-600/50 bg-[#020005] py-1.5 pl-2 pr-8 text-violet-200 outline-none hover:border-violet-400 hover:bg-violet-950/30 focus:border-violet-400 focus:shadow-uv-glow cursor-pointer transition-colors"
-              value={activeProjectId || ""}
-              onChange={(e) => {
-                if (e.target.value === "__NEW__") {
-                  setIsCreatingProject(true);
-                } else {
-                  onSelectProject(e.target.value);
-                }
-              }}
-            >
-              <option value="" disabled>Select a project</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-              <option value="__NEW__">+ New Project</option>
-            </select>
-          </div>
+          <>
+            <div className="flex items-center gap-2">
+              <select
+                className="flex-1 truncate border border-violet-600/50 bg-[#020005] py-1.5 pl-2 pr-8 text-violet-200 outline-none hover:border-violet-400 hover:bg-violet-950/30 focus:border-violet-400 focus:shadow-uv-glow cursor-pointer transition-colors"
+                value={activeProjectId || ""}
+                onChange={(e) => {
+                  if (e.target.value === "__NEW__") {
+                    setIsCreatingProject(true);
+                  } else if (e.target.value === "__OPEN__") {
+                    handleOpenFolder();
+                  } else {
+                    onSelectProject(e.target.value);
+                  }
+                }}
+              >
+                <option value="" disabled>Select a project</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+                <option value="__NEW__">+ New Project</option>
+                <option value="__OPEN__">{isOpeningFolder ? "Waiting for picker..." : "Open Folder..."}</option>
+              </select>
+            </div>
+            {openFolderError && (
+              <span className="text-[9px] text-red-400 mt-1">{openFolderError}</span>
+            )}
+          </>
         )}
       </div>
 
@@ -546,7 +591,7 @@ export default function ProjectSidebar({
             <div className="flex flex-col mt-2 font-mono">
               {timelines.map(t => renderTimelineItem(t))}
               {timelines.length === 0 && (
-                <span className="px-2 py-2 text-xs text-violet-800">No timelines yet</span>
+                <span className="px-2 py-2 text-[10px] text-violet-800 leading-relaxed">No timelines yet — create one to plot events and story structure as a visual graph.</span>
               )}
             </div>
           </div>
@@ -635,7 +680,7 @@ export default function ProjectSidebar({
               ))}
               {(documentsByFolder.get(null) ?? []).map(d => renderDocumentItem(d, 0))}
               {documents.length === 0 && documentFolders.length === 0 && (
-                <span className="px-2 py-2 text-xs text-violet-800">No crystals yet</span>
+                <span className="px-2 py-2 text-[10px] text-violet-800 leading-relaxed">No crystals yet — crystals are your writing documents (chapters, scenes, drafts). Click + to create one.</span>
               )}
             </div>
           </div>
@@ -712,7 +757,7 @@ export default function ProjectSidebar({
               ))}
               {(wikiEntriesByFolder.get(null) ?? []).map(w => renderWikiItem(w, 0))}
               {wikiEntries.length === 0 && wikiFolders.length === 0 && (
-                <span className="px-2 py-2 text-xs text-violet-800">No artifacts yet</span>
+                <span className="px-2 py-2 text-[10px] text-violet-800 leading-relaxed">No artifacts yet — artifacts are wiki entries for characters, locations, lore, and more. The AI uses them as context.</span>
               )}
             </div>
           </div>
