@@ -2,34 +2,44 @@
   "name": "rhyolite",
   "private": true,
   "version": "0.1.0",
+  "type": "module",
   "scripts": {
-    "dev": "next dev -p 3000",
-    "build": "next build",
-    "start": "next start -p 3000",
-    "lint": "next lint"
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "prepare": "svelte-kit sync || echo ''",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+    "tauri": "tauri"
   },
   "dependencies": {
-    "@google/genai": "^1.46.0",
-    "@paralleldrive/cuid2": "^3.3.0",
+    "@google/genai": "^1.48.0",
+    "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/cli": "^2.10.1",
+    "@tauri-apps/plugin-dialog": "^2.7.0",
+    "@tauri-apps/plugin-fs": "^2.5.0",
+    "@xyflow/svelte": "^1.1.2",
     "d3-force": "^3.0.0",
+    "dagre": "^0.8.5",
+    "dompurify": "^3.2.3",
     "gray-matter": "^4.0.3",
-    "next": "^15.2.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "react-markdown": "^10.1.0",
-    "reactflow": "^11.11.4",
-    "remark-gfm": "^4.0.1",
-    "zod": "^4.3.6"
+    "lucide-svelte": "^0.473.0",
+    "marked": "^15.0.3"
   },
   "devDependencies": {
+    "@sveltejs/adapter-static": "^3.0.6",
+    "@sveltejs/kit": "^2.15.1",
+    "@sveltejs/vite-plugin-svelte": "^5.0.3",
+    "@types/d3-force": "^3.0.10",
+    "@types/dagre": "^0.7.54",
+    "@types/dompurify": "^3.0.5",
     "@types/node": "^22.10.0",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
     "autoprefixer": "^10.4.20",
-    "eslint": "^9.16.0",
-    "eslint-config-next": "^15.2.0",
     "postcss": "^8.5.3",
+    "svelte": "^5.17.3",
+    "svelte-check": "^4.1.1",
     "tailwindcss": "^3.4.16",
-    "typescript": "^5.8.2"
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7"
   }
 }

@@ -1,0 +1,189 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700&family=Fraunces:ital,opsz,wght@0,9..144,100..900;1,9..144,100..900&display=swap');
+@import url("https://api.fontshare.com/v2/css?f[]=satoshi@400,500,600,700&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@font-face {
+  font-family: 'Monaspace Neon';
+  src: url('https://cdn.jsdelivr.net/gh/githubnext/monaspace@v1.101/fonts/webfonts/MonaspaceNeon-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'Monaspace Neon';
+  src: url('https://cdn.jsdelivr.net/gh/githubnext/monaspace@v1.101/fonts/webfonts/MonaspaceNeon-Italic.woff2') format('woff2');
+  font-weight: 400;
+  font-style: italic;
+}
+@font-face {
+  font-family: 'Monaspace Neon';
+  src: url('https://cdn.jsdelivr.net/gh/githubnext/monaspace@v1.101/fonts/webfonts/MonaspaceNeon-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+}
+
+/* Optional: add static/fonts/nightingale.woff2 (OFL) for Death of Typography Nightingale */
+@font-face {
+  font-family: "Nightingale";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/nightingale.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Assistant";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/assistant.woff2") format("woff2");
+}
+
+/*
+ * Animated blobs must live on body pseudo-elements, not html::before:
+ * body sat above html::before in the stack, so transparent body backgrounds
+ * only showed html’s black — never the animation.
+ */
+html {
+  background-color: #000;
+  min-height: 100%;
+}
+
+body {
+  isolation: isolate;
+  position: relative;
+  min-height: 100vh;
+  margin: 0;
+  background-color: #050505; /* Deep off-black terminal bg */
+  font-feature-settings: "calt" 1, "liga" 1, "dlig" 1;
+}
+
+/* Custom Blocky Terminal Scrollbars */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #000;
+  border-left: 1px solid rgba(139, 92, 246, 0.2);
+  border-top: 1px solid rgba(139, 92, 246, 0.2);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(139, 92, 246, 0.3);
+  border: 1px solid rgba(139, 92, 246, 0.6);
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(139, 92, 246, 0.7);
+  box-shadow: 0 0 10px rgba(139, 92, 246, 0.5);
+}
+
+/* Terminal Selection: Solid Violet block, Black text */
+::selection {
+  background-color: rgba(139, 92, 246, 0.9);
+  color: #000 !important;
+  text-shadow: none;
+}
+
+/* CRT Vignette Overlay — disabled (was too heavy) */
+.crt-overlay {
+  display: none;
+}
+
+/* Mouse Tracking Crosshairs */
+.crosshair-x {
+  position: fixed;
+  top: var(--mouse-y, 50vh);
+  left: 0;
+  width: 100vw;
+  height: 1px;
+  background-color: rgba(139, 92, 246, 0.1); /* Faint violet */
+  pointer-events: none;
+  z-index: 10000;
+  mix-blend-mode: screen;
+}
+.crosshair-y {
+  position: fixed;
+  left: var(--mouse-x, 50vw);
+  top: 0;
+  width: 1px;
+  height: 100vh;
+  background-color: rgba(139, 92, 246, 0.1); /* Faint violet */
+  pointer-events: none;
+  z-index: 10000;
+  mix-blend-mode: screen;
+}
+.crosshair-center {
+  position: fixed;
+  top: calc(var(--mouse-y, 50vh) - 2px);
+  left: calc(var(--mouse-x, 50vw) - 2px);
+  width: 5px;
+  height: 5px;
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  pointer-events: none;
+  z-index: 10000;
+  mix-blend-mode: screen;
+}
+
+/* Subtle violet wash (static — terminal UI reads cleaner without heavy motion) */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.35;
+  background:
+    radial-gradient(
+      ellipse 70% 55% at 20% 30%,
+      rgba(88, 28, 135, 0.45),
+      transparent 55%
+    ),
+    radial-gradient(
+      ellipse 60% 50% at 85% 70%,
+      rgba(59, 7, 100, 0.5),
+      transparent 50%
+    );
+}
+
+/* Cyberpunk-style scanlines and wire grid over near-black */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%),
+    linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06)),
+    linear-gradient(rgba(124, 58, 237, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(124, 58, 237, 0.045) 1px, transparent 1px);
+  background-size:
+    100% 2px,
+    3px 100%,
+    32px 32px,
+    32px 32px;
+  background-position: 0 0, 0 0, 0 0, 0 0;
+  opacity: 0.8;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::before {
+    opacity: 0.22;
+  }
+}
+
+/* All direct body children (Next.js root) above ::before / ::after */
+body > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Italic emphasis: Fraunces (loaded normal + italic via next/font in layout) */
+em,
+i {
+  font-family: var(--font-fraunces), ui-serif, Georgia, serif;
+  font-style: italic;
+}
+

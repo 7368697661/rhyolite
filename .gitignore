@@ -1,16 +1,39 @@
 node_modules
+
+# Output
+.output
+.vercel
+.netlify
+.wrangler
+/.svelte-kit
+/build
 .next
-dev.db
 
-# Environment (contains API keys)
-.env
-
-# User project data
-.workspace/
-
-# Build artifacts
-/generated/prisma
-tsconfig.tsbuildinfo
-
-# OS junk
+# OS
 .DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.*
+!.env.example
+!.env.test
+
+# Cursor (local plans; keep rules if you version them)
+.cursor/plans/
+
+# Local workspace / DB / caches
+.workspace/
+dev.db
+*.tsbuildinfo
+
+# Generated / reference (not part of app source)
+generated/
+rhyolite-reference/
+
+# Vite
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# Accidental duplicate configs
+tailwind.config 2.js
