@@ -1,6 +1,15 @@
 
 
+![rhyolite_logo](public/rhyolite_logo.png)
+
 **Private, local, desktop-native workspace for writers, researchers, and worldbuilders powered by multi-provider LLMs.**
+
+[![GitHub Repo](https://img.shields.io/badge/github-7368697661%2Frhyolite-violet?style=flat-square&logo=github)](https://github.com/7368697661/rhyolite)
+![License](https://img.shields.io/badge/license-BSL_1.1-blueviolet?style=flat-square)
+![Svelte](https://img.shields.io/badge/Svelte-5-FF3E00?style=flat-square&logo=svelte&logoColor=white)
+![Tauri](https://img.shields.io/badge/Tauri-2.0-FFC131?style=flat-square&logo=tauri&logoColor=white)
+![Rust](https://img.shields.io/badge/Rust-1.80+-000000?style=flat-square&logo=rust&logoColor=white)
+![Tailwind](https://img.shields.io/badge/Tailwind_CSS-3-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white)
 
 
 
@@ -164,31 +173,31 @@ To prevent runaway costs and infinite loops, the system enforces strict guardrai
 ```mermaid
 sequenceDiagram
     participant User
-    participant Loop as Svelte Agent Loop
+    participant AgentLoop as Svelte Agent Loop
     participant Tauri as Rust Backend
     participant LLM as Provider API
     
-    User->>Loop: Send Message (Carve Mode)
-    Loop->>Tauri: Gather 5-Pillar Context
-    Tauri-->>Loop: Return Context
+    User->>AgentLoop: Send Message (Carve Mode)
+    AgentLoop->>Tauri: Gather 5-Pillar Context
+    Tauri-->>AgentLoop: Return Context
     
     loop Max 20 Iterations
-        Loop->>LLM: Send Context + History + Available Tools
-        LLM-->>Loop: Return Tool Call Request (e.g., update_artifact)
+        AgentLoop->>LLM: Send Context + History + Available Tools
+        LLM-->>AgentLoop: Return Tool Call Request (e.g., update_artifact)
         
         alt Tool is High Risk
-            Loop->>User: Pause & Request Approval
-            User-->>Loop: Approved
+            AgentLoop->>User: Pause & Request Approval
+            User-->>AgentLoop: Approved
         end
         
-        Loop->>Tauri: Execute Tool (Write to FS)
-        Tauri-->>Loop: Success/Failure Data
-        Loop->>Loop: Append Tool Result to History
+        AgentLoop->>Tauri: Execute Tool (Write to FS)
+        Tauri-->>AgentLoop: Success/Failure Data
+        AgentLoop->>AgentLoop: Append Tool Result to History
     end
     
-    Loop->>LLM: Final Prompt (Generate Response)
-    LLM-->>Loop: Stream Text Response
-    Loop-->>User: Render Final Output
+    AgentLoop->>LLM: Final Prompt (Generate Response)
+    LLM-->>AgentLoop: Stream Text Response
+    AgentLoop-->>User: Render Final Output
 ```
 
 
