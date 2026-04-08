@@ -3,7 +3,8 @@
     import { fade, scale } from 'svelte/transition';
     import { backOut } from 'svelte/easing';
     import { executePolisherGeneration } from '$lib/agents/infill';
-    import { tick } from 'svelte';
+    import { readGlyphs } from '$lib/agents/fs-db';
+    import { tick, onMount, onDestroy } from 'svelte';
 
     let {
         projectId,
@@ -31,15 +32,22 @@
     const isRewrite = selectedText.length > 0;
     const modeLabel = isRewrite ? "Rewriting selection" : "Forward-generating";
 
-    // Auto-generate on mount
-    $effect(() => {
-        generate();
-        return () => {
-            abortController?.abort();
-        };
-    });
+    onMount(() => { generate(); });
+    onDestroy(() => { abortController?.abort(); });
 
     async function generate() {
+        // Pre-flight: verify a Polisher glyph exists before hitting the network
+        try {
+            const glyphs = await readGlyphs();
+            if (!glyphs.some(g => g.isPolisherEngine)) {
+                error = "No Glyph is marked as a Polisher Engine. Open the Glyph Registry and enable the \"Polisher Engine\" toggle on a Glyph.";
+                return;
+            }
+        } catch {
+            error = "Failed to load Glyphs. Check your workspace configuration.";
+            return;
+        }
+
         abortController?.abort();
         const ac = new AbortController();
         abortController = ac;
