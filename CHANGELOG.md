@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.4.0] - 2026-04-07 (SvelteKit + Tauri Desktop)
+
+### Added
+- **Desktop stack**: SvelteKit 2, Svelte 5 (runes), Vite 6, and **Tauri 2** with a **Rust** backend (`src-tauri/`) for filesystem I/O, project scanning, timelines, embeddings/RAG helpers, and secure local operations via `invoke`.
+- **UI layer**: New Svelte components for sidebar, editor (markdown + live preview), Studio chat, command palette (`⌘K`), DAG canvas (`@xyflow/svelte` + Dagre layout), node editor, glyphs registry, project settings, top bar, Quarry (global network graph), and in-app docs modal (`[ Docs ]` in the top bar + global `showDocs` state).
+- **Agent & LLM (TypeScript)**: Agent loop, tool catalog, multi-provider support (`@google/genai` + OpenAI-compatible + Anthropic patterns), chat branching, plan/blueprint execution, chisel delegation (`delegate_to_specialist`, `delegate_fan_out`), streaming tool/subagent UI, live context token estimate with hover breakdown, `@` mention autocomplete for crystals/artifacts, and file attachments via Tauri dialog/fs plugins.
+- **README**: Full rewrite—approachable user guide (glossary, modes, use cases), deep technical section (architecture, 5-pillar RAG, agent loop, delegation, ER model) with detailed Mermaid diagrams, install prerequisites (Node + Rust), `npm run tauri dev`, environment variables, and font credits. GitHub / license badges updated for Svelte, Tauri, and Rust.
+
+### Changed
+- **Persistence model**: Project data remains Markdown + JSON on disk (Obsidian-friendly); reads/writes go through Tauri commands instead of Next.js API routes (removed `src/app/api/**`).
+- **Terminology in UI**: Studio modes aligned with the stone theme where applicable (e.g. Inspect / Carve / Blueprint naming in docs and product copy).
+- **Fonts**: `assistant.woff2` and `nightingale.woff2` served from `static/fonts/` for the Svelte app.
+
+### Fixed / Hardened
+- **DAG / timeline canvas**: Inline prompts replace browser `prompt()` (Tauri-safe); `bind:nodes` / `bind:edges` for correct xyflow interaction; network map reload split from timeline effects to stop flicker; agent tool runs trigger `reloadProjectData()` so canvas/sidebar stay in sync.
+- **RAG & context**: More resilient wiki keyword matching (titles, aliases, word tokens); chat project context fallback when a bound doc/timeline is missing; `projectId` passed on document/wiki `invoke` writes so resolves and saves land in the correct project folder.
+- **Editor**: Direct `resolve_dead_links` tool invocation with progress UI; callout cards, entity link chips, dead-link dashed styling; breadcrumbs; editor caret/block styling; various preview and accessibility fixes.
+- **Repository hygiene**: `.gitignore` extended for `.cursor/plans/`, `.next/`, `.workspace/`, `dev.db`, `*.tsbuildinfo`, `generated/`, `rhyolite-reference/`, and duplicate `tailwind.config 2.js`. `.env` remains ignored with `!.env.example` / `!.env.test`.
+
+### Removed
+- **Next.js 15 / React 19** app router, React components under `src/app/**` and `src/components/**`, and all associated API route handlers.
+- **Prisma** and prior server-only Node persistence paths tied to the old stack.
+
 ## [v0.3.0] - 2026-04-03 (Obsidian Parity & Sub-Agents)
 ### Added
 - **Enhanced Dead Link Resolver**: Upgraded the link resolution system to use a 3-stage agent pipeline (Researcher → Writer → Auditor). Automatically generates fully fleshed-out articles instead of simple stubs. Features live streaming progress bars in the UI.
