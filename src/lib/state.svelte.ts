@@ -32,6 +32,8 @@ export type Glyph = {
     role: string;
     systemInstruction?: string;
     specialistRole?: string;
+    isCompletionModel?: boolean;
+    isPolisherEngine?: boolean;
 };
 
 export class AppState {

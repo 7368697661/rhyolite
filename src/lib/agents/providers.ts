@@ -1,5 +1,6 @@
 import { streamGeminiText, getSafetySettings, type SafetyPreset } from "./gemini";
 import type { StreamChunk } from "./streamTypes";
+import { invoke } from '@tauri-apps/api/core';
 
 export type { StreamChunk, StreamChannel } from "./streamTypes";
 
@@ -16,10 +17,24 @@ export interface StreamModelParams {
   safetyPreset?: SafetyPreset;
   /** When true, request provider-native reasoning where supported (extra cost/latency). */
   enableReasoning?: boolean;
+  /** When true, use raw /completions endpoint instead of /chat/completions. */
+  isCompletionModel?: boolean;
 }
 
-function getEnv(key: string): string | undefined {
-  return process.env[key];
+/** Env cache to avoid repeated IPC round-trips within a single session. */
+const envCache = new Map<string, string | undefined>();
+
+async function getEnv(key: string): Promise<string | undefined> {
+  if (envCache.has(key)) return envCache.get(key);
+  try {
+    const val: string | null = await invoke('get_config', { key });
+    const result = val ?? undefined;
+    envCache.set(key, result);
+    return result;
+  } catch {
+    envCache.set(key, undefined);
+    return undefined;
+  }
 }
 
 function extractOpenRouterReasoningDelta(
@@ -54,9 +69,78 @@ function extractOpenRouterReasoningDelta(
 async function* streamOpenAI(
   params: StreamModelParams
 ): AsyncGenerator<StreamChunk> {
-  const apiKey = getEnv("OPENAI_API_KEY") ?? "";
-  const baseUrl = getEnv("OPENAI_BASE_URL") ?? "https://api.openai.com/v1";
+  const apiKey = (await getEnv("OPENAI_API_KEY")) ?? "";
+  const baseUrl = (await getEnv("OPENAI_BASE_URL")) ?? "https://api.openai.com/v1";
 
+  const isCompletion = !!params.isCompletionModel;
+
+  if (isCompletion) {
+    // Raw /completions endpoint — flatten messages into a single prompt string
+    let prompt = "";
+    if (params.systemInstruction) {
+      prompt += params.systemInstruction + "\n\n";
+    }
+    for (const m of params.messages) {
+      prompt += m.content + "\n";
+    }
+
+    const body: Record<string, unknown> = {
+      model: params.model,
+      prompt,
+      stream: true,
+      temperature: params.temperature,
+      max_tokens: params.maxOutputTokens,
+    };
+
+    const res = await fetch(`${baseUrl}/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+      },
+      body: JSON.stringify(body),
+      signal: params.abortSignal,
+    });
+
+    if (!res.ok || !res.body) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`OpenAI Completions API error ${res.status}: ${text}`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith("data: ")) continue;
+        const data = trimmed.slice(6);
+        if (data === "[DONE]") return;
+        try {
+          const parsed = JSON.parse(data) as {
+            choices?: Array<{ text?: string }>;
+          };
+          const text = parsed.choices?.[0]?.text;
+          if (typeof text === "string" && text) {
+            yield { channel: "content", text };
+          }
+        } catch {
+          /* skip malformed */
+        }
+      }
+    }
+    return;
+  }
+
+  // Standard /chat/completions path
   const messages: Array<{ role: string; content: string }> = [];
   if (params.systemInstruction) {
     messages.push({ role: "system", content: params.systemInstruction });
@@ -71,7 +155,7 @@ async function* streamOpenAI(
   const useOpenRouterReasoning =
     !!params.enableReasoning &&
     (baseUrl.includes("openrouter.ai") ||
-      getEnv("OPENROUTER_REASONING") === "true");
+      (await getEnv("OPENROUTER_REASONING")) === "true");
 
   const body: Record<string, unknown> = {
     model: params.model,
@@ -140,7 +224,7 @@ async function* streamOpenAI(
 async function* streamAnthropic(
   params: StreamModelParams
 ): AsyncGenerator<StreamChunk> {
-  const apiKey = getEnv("ANTHROPIC_API_KEY");
+  const apiKey = await getEnv("ANTHROPIC_API_KEY");
   if (!apiKey) throw new Error("Missing ANTHROPIC_API_KEY");
 
   const messages: Array<{ role: string; content: string }> = [];
@@ -263,11 +347,11 @@ export async function streamModel(
 }
 
 /** Returns providers that have their API keys configured. */
-export function getAvailableProviders(): Provider[] {
+export async function getAvailableProviders(): Promise<Provider[]> {
   const available: Provider[] = ["gemini"];
-  if (getEnv("OPENAI_API_KEY") || getEnv("OPENAI_BASE_URL")) {
+  if ((await getEnv("OPENAI_API_KEY")) || (await getEnv("OPENAI_BASE_URL"))) {
     available.push("openai");
   }
-  if (getEnv("ANTHROPIC_API_KEY")) available.push("anthropic");
+  if (await getEnv("ANTHROPIC_API_KEY")) available.push("anthropic");
   return available;
 }

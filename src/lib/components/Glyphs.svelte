@@ -20,6 +20,8 @@
     let isSculpter = $state(false);
     let role = $state('');
     let specialistRole = $state('');
+    let isCompletionModel = $state(false);
+    let isPolisherEngine = $state(false);
 
     // Sync form with active glyph only when the selected glyph changes
     let currentGlyphId = $state<string | null>(null);
@@ -36,6 +38,8 @@
                 isSculpter = activeGlyph.isSculpter;
                 role = activeGlyph.role;
                 specialistRole = activeGlyph.specialistRole || '';
+                isCompletionModel = activeGlyph.isCompletionModel || false;
+                isPolisherEngine = activeGlyph.isPolisherEngine || false;
             } else {
                 name = '';
                 model = 'gemini-1.5-pro';
@@ -44,6 +48,8 @@
                 isSculpter = false;
                 role = '';
                 specialistRole = '';
+                isCompletionModel = false;
+                isPolisherEngine = false;
             }
         }
     });
@@ -58,7 +64,9 @@
             outputLength,
             isSculpter,
             role,
-            specialistRole: specialistRole || undefined
+            specialistRole: specialistRole || undefined,
+            isCompletionModel: isCompletionModel || undefined,
+            isPolisherEngine: isPolisherEngine || undefined
         };
         
         // Optimistically update local state so UI doesn't reset mid-typing
@@ -210,13 +218,37 @@
 
                         <div class="space-y-2 flex items-center pt-6">
                             <label class="flex items-center gap-3 cursor-pointer group">
-                                <input 
+                                <input
                                     type="checkbox"
                                     bind:checked={isSculpter}
                                     onchange={handleSave}
                                     class="w-4 h-4 bg-[#020005] border border-violet-900 rounded checked:bg-violet-500 appearance-none flex items-center justify-center after:content-[''] after:w-2 after:h-2 after:bg-white after:rounded-sm after:hidden checked:after:block outline-none"
                                 />
                                 <span class="text-xs uppercase tracking-widest text-violet-300 group-hover:text-violet-100 transition-colors">Sculptor (Show in Studio)</span>
+                            </label>
+                        </div>
+
+                        <div class="space-y-2 flex items-center pt-6">
+                            <label class="flex items-center gap-3 cursor-pointer group">
+                                <input
+                                    type="checkbox"
+                                    bind:checked={isCompletionModel}
+                                    onchange={handleSave}
+                                    class="w-4 h-4 bg-[#020005] border border-violet-900 rounded checked:bg-amber-500 appearance-none flex items-center justify-center after:content-[''] after:w-2 after:h-2 after:bg-white after:rounded-sm after:hidden checked:after:block outline-none"
+                                />
+                                <span class="text-xs uppercase tracking-widest text-violet-300 group-hover:text-violet-100 transition-colors">Completion Engine (Raw Prompt)</span>
+                            </label>
+                        </div>
+
+                        <div class="space-y-2 flex items-center pt-6 col-span-2">
+                            <label class="flex items-center gap-3 cursor-pointer group">
+                                <input
+                                    type="checkbox"
+                                    bind:checked={isPolisherEngine}
+                                    onchange={handleSave}
+                                    class="w-4 h-4 bg-[#020005] border border-violet-900 rounded checked:bg-cyan-500 appearance-none flex items-center justify-center after:content-[''] after:w-2 after:h-2 after:bg-white after:rounded-sm after:hidden checked:after:block outline-none"
+                                />
+                                <span class="text-xs uppercase tracking-widest text-violet-300 group-hover:text-violet-100 transition-colors">Polisher Engine (Multi-Gen Refining)</span>
                             </label>
                         </div>
 

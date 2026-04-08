@@ -131,6 +131,39 @@ For parallel delegation, the Sculptor can call delegate_fan_out with multiple ch
 Navigate to the Glyph Registry page to create custom personas. Uncheck "Sculptor (Show in Studio)" to make a glyph a chisel template.`,
         },
         {
+            id: "polisher",
+            title: "The Polisher",
+            content: `## The Polisher (Multi-Generation Refining)
+The Polisher is a multi-generation text manipulation tool designed for non-chat completion models (like Llama 3.1 405B) and creative refinement workflows.
+
+### How It Works
+1. **Select text** in the editor (or place your cursor for forward-generation)
+2. **Open The Polisher** via the floating "Polish" button or \`Ctrl+Shift+P\` / \`Cmd+Shift+P\`
+3. **Three parallel generations** ("Facets") stream in simultaneously on the left
+4. **Click "Use"** on any facet to import its text into the Polishing Wheel on the right
+5. **Mix, edit, and refine** the imported text freely in the Polishing Wheel
+6. **Click "Apply Polish"** to inject the final text back into your document
+
+### Modes
+- **Rewrite mode**: When text is selected, each facet produces a variation of the selected passage that fits the surrounding context
+- **Forward-generation mode**: When no text is selected, each facet continues writing from the cursor position
+
+### Setup
+1. Go to the **Glyph Registry**
+2. Create or select a Glyph configured for your preferred completion model
+3. Enable the **Completion Engine** toggle if your model uses raw \`/completions\` endpoints (e.g., Llama via OpenRouter, vLLM, or Ollama)
+4. Enable the **Polisher Engine** toggle to designate it as the generation engine for The Polisher
+
+### Polisher vs Basic Infill
+| Feature | Basic Infill | The Polisher |
+|---------|-------------|-------------|
+| Generations | Single | 3 parallel |
+| Model | Default (Gemini Flash) | Dedicated Polisher Glyph |
+| Editing | Direct replacement | Interactive mixing wheel |
+| Best for | Quick rewrites | Deliberate prose refinement |
+| Shortcut | Click "Rewrite / Infill" | \`Ctrl+Shift+P\` or "Polish" button |`,
+        },
+        {
             id: "shortcuts",
             title: "Keyboard Shortcuts",
             content: `## Global
@@ -150,6 +183,7 @@ Navigate to the Glyph Registry page to create custom personas. Uncheck "Sculptor
 ## Editor
 | Shortcut | Action |
 |----------|--------|
+| \`⌘+Shift+P\` / \`Ctrl+Shift+P\` | Open The Polisher |
 | Standard text editing | Supported in the markdown editor |
 
 ## Command Palette

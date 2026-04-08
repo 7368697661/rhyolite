@@ -9,6 +9,7 @@
     import { embedSingleEntry } from '$lib/agents/embeddings';
     import { Lightbulb, Link as LinkIcon, Hash, Type } from 'lucide-svelte';
     import { tick } from 'svelte';
+    import PolisherModal from './PolisherModal.svelte';
     
     let content = $state("");
     let title = $state("");
@@ -23,6 +24,10 @@
     let infillInstruction = $state("");
     let isInfilling = $state(false);
     let textareaRef = $state<HTMLTextAreaElement | null>(null);
+
+    // Polisher state
+    let isPolisherOpen = $state(false);
+    let polisherSelection = $state<{ start: number; end: number; text: string } | null>(null);
 
     $effect(() => {
         // Only run when the selected file changes, not when content updates
@@ -143,6 +148,43 @@
             isInfillOpen = false;
             selection = null;
             infillInstruction = "";
+        }
+    }
+
+    function openPolisher() {
+        if (selection) {
+            polisherSelection = { ...selection };
+        } else {
+            // Forward-generation from cursor
+            const pos = textareaRef?.selectionStart ?? content.length;
+            polisherSelection = { start: pos, end: pos, text: "" };
+        }
+        isPolisherOpen = true;
+        isInfillOpen = false;
+    }
+
+    async function handlePolisherApply(polishedText: string) {
+        if (!polisherSelection || !appState.activeItem || !appState.activeProjectId) return;
+        const { start, end } = polisherSelection;
+        content = content.substring(0, start) + polishedText + content.substring(end);
+        await handleSave();
+
+        if (textareaRef) {
+            await tick();
+            const newPos = start + polishedText.length;
+            textareaRef.setSelectionRange(newPos, newPos);
+        }
+
+        isPolisherOpen = false;
+        polisherSelection = null;
+        selection = null;
+    }
+
+    function handleEditorKeydown(e: KeyboardEvent) {
+        // Cmd/Ctrl+Shift+P → Open The Polisher
+        if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'P') {
+            e.preventDefault();
+            openPolisher();
         }
     }
 
@@ -405,13 +447,14 @@
                 oninput={debouncedSave}
                 onmouseup={handleSelection}
                 onkeyup={handleSelection}
+                onkeydown={handleEditorKeydown}
                 class="editor-textarea flex-1 resize-none bg-transparent p-6 text-[15px] leading-relaxed text-violet-100 outline-none placeholder:text-violet-800 focus:shadow-[inset_0_0_20px_rgba(139,92,246,0.05)]"
                 placeholder="Begin transmission..."
                 spellcheck="false"
             ></textarea>
             
-            <!-- Floating Infill Prompt -->
-            {#if selection && !isInfilling && !isInfillOpen}
+            <!-- Floating Action Bar -->
+            {#if selection && !isInfilling && !isInfillOpen && !isPolisherOpen}
                 <div class="absolute left-6 right-6 top-16 z-10 flex gap-2 justify-end pointer-events-none">
                     <button
                         type="button"
@@ -419,6 +462,13 @@
                         class="pointer-events-auto border border-violet-500/70 bg-violet-950/90 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-violet-100 hover:border-violet-400 hover:bg-violet-600 transition-colors shadow-[0_0_20px_rgba(139,92,246,0.3)] backdrop-blur-sm"
                     >
                         Rewrite / Infill
+                    </button>
+                    <button
+                        type="button"
+                        onclick={openPolisher}
+                        class="pointer-events-auto border border-cyan-500/70 bg-cyan-950/90 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-cyan-100 hover:border-cyan-400 hover:bg-cyan-700 transition-colors shadow-[0_0_20px_rgba(6,182,212,0.3)] backdrop-blur-sm"
+                    >
+                        Polish
                     </button>
                 </div>
             {/if}
@@ -517,6 +567,17 @@
         </div>
     </div>
 </div>
+
+{#if isPolisherOpen && appState.activeProjectId}
+    <PolisherModal
+        projectId={appState.activeProjectId}
+        selectedText={polisherSelection?.text || ""}
+        fullContent={content}
+        cursorPos={polisherSelection?.end ?? 0}
+        onApply={handlePolisherApply}
+        onClose={() => { isPolisherOpen = false; polisherSelection = null; }}
+    />
+{/if}
 
 <style>
     .no-scrollbar::-webkit-scrollbar {

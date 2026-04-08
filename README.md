@@ -32,6 +32,7 @@ The interface uses a stone/crafting theme to reflect the creative process of sha
 - **Chisels**: Specialized AI sub-agents that Sculptors can delegate complex tasks to.
 - **Bedrock**: The core canon or rules of your world (always known by the AI).
 - **The Grain**: The high-level story outline or narrative direction.
+- **The Polisher**: Multi-generation refining tool for blending parallel text variations.
 
 ---
 
@@ -68,6 +69,16 @@ You aren't stuck with a single, generic model. In the **Glyph Registry**, you ca
 
 - **Sculptors**: The personas you select from the dropdown in the Studio.
 - **Chisels**: If you uncheck "Sculptor", a Glyph becomes a Chisel. These are specialized workers (e.g., "Continuity Checker", "Deep Researcher"). In Carve mode, a Sculptor can realize a task is too big and autonomously delegate it to a Chisel, or even fan-out the task to multiple Chisels at once.
+
+### 5. The Polisher (Multi-Generation Refining)
+
+The Polisher is a dedicated prose refinement tool that generates multiple text variations in parallel and lets you manually blend them into a final result.
+
+- **Open it** by selecting text and clicking "Polish" in the floating toolbar, or press `Ctrl+Shift+P` / `Cmd+Shift+P`.
+- **Three parallel generations** ("Facets") stream simultaneously. Click "Use" on any facet to import it into the Polishing Wheel.
+- **Mix, edit, and refine** freely in the Polishing Wheel editor, then click "Apply Polish" to inject the final text.
+- **Supports non-chat completion models**: Enable the "Completion Engine" toggle on a Glyph to use raw `/completions` endpoints (for models like Llama 3.1 405B via OpenRouter, vLLM, or Ollama).
+- **Setup**: Mark a Glyph as "Polisher Engine" in the Glyph Registry to designate it as the generation engine for The Polisher.
 
 ---
 
