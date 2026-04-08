@@ -1,10 +1,12 @@
 <script lang="ts">
-    import { X, Gem, RotateCw, Check, Loader2 } from 'lucide-svelte';
+    import { X, Gem, RotateCw, Check, Loader2, PanelLeftOpen, PanelLeftClose, ZoomOut } from 'lucide-svelte';
     import { fade, scale } from 'svelte/transition';
     import { backOut } from 'svelte/easing';
     import { executePolisherGeneration } from '$lib/agents/infill';
     import { readGlyphs } from '$lib/agents/fs-db';
     import { tick, onMount, onDestroy } from 'svelte';
+    import PolisherTree from './PolisherTree.svelte';
+    import type { GemNode } from '$lib/polisher/types';
 
     let {
         projectId,
@@ -22,21 +24,90 @@
         onClose: () => void;
     }>();
 
-    let generations = $state<string[]>(["", "", ""]);
+    // ---------------------------------------------------------------------------
+    // Gem Tree State
+    // ---------------------------------------------------------------------------
+
+    let nextId = 1;
+    function makeId(): string { return `gem_${nextId++}`; }
+
+    const rootNode: GemNode = $state({
+        id: makeId(),
+        parentId: null,
+        text: "",
+        children: [],
+    });
+
+    /** Flat index for fast lookup — kept in sync manually. */
+    let nodeIndex = $state<Map<string, GemNode>>(new Map([[rootNode.id, rootNode]]));
+
+    let activeNodeId = $state(rootNode.id);
+    let rootViewId = $state<string | null>(null); // null = show full tree
+    let showGems = $state(false);
+
+    let activeNode = $derived(nodeIndex.get(activeNodeId) ?? rootNode);
+
+    // ---------------------------------------------------------------------------
+    // Generation state
+    // ---------------------------------------------------------------------------
+
+    /** Live streaming text for in-flight facets (not yet committed to tree). */
+    let pendingFacets = $state<string[]>(["", "", ""]);
     let isGenerating = $state(false);
     let polishedText = $state("");
     let error = $state<string | null>(null);
-    let abortController = $state<AbortController | null>(null);
+    let abortController: AbortController | null = null;
     let polishAreaRef = $state<HTMLTextAreaElement | null>(null);
 
     const isRewrite = selectedText.length > 0;
     const modeLabel = isRewrite ? "Rewriting selection" : "Forward-generating";
 
+    /** The facets displayed in the middle pane: either live pending ones or committed children. */
+    let displayFacets = $derived.by(() => {
+        if (isGenerating) return pendingFacets;
+        return activeNode.children.map((c: GemNode) => c.text);
+    });
+
+    // ---------------------------------------------------------------------------
+    // Context Resolution — walk from node to root, concatenate branch text
+    // ---------------------------------------------------------------------------
+
+    function resolveBranchContext(nodeId: string): string {
+        const path: string[] = [];
+        let current = nodeIndex.get(nodeId);
+        while (current) {
+            if (current.text) path.unshift(current.text);
+            current = current.parentId ? nodeIndex.get(current.parentId) : undefined;
+        }
+        return path.join("\n\n");
+    }
+
+    // ---------------------------------------------------------------------------
+    // Tree helpers
+    // ---------------------------------------------------------------------------
+
+    function findViewRoot(): GemNode {
+        if (rootViewId) {
+            return nodeIndex.get(rootViewId) ?? rootNode;
+        }
+        return rootNode;
+    }
+
+    function zoomOut() {
+        if (!rootViewId) return;
+        const viewRoot = nodeIndex.get(rootViewId);
+        rootViewId = viewRoot?.parentId ?? null;
+    }
+
+    // ---------------------------------------------------------------------------
+    // Generation
+    // ---------------------------------------------------------------------------
+
     onMount(() => { generate(); });
     onDestroy(() => { abortController?.abort(); });
 
     async function generate() {
-        // Pre-flight: verify a Polisher glyph exists before hitting the network
+        // Pre-flight: verify a Polisher glyph exists
         try {
             const glyphs = await readGlyphs();
             if (!glyphs.some(g => g.isPolisherEngine)) {
@@ -53,20 +124,44 @@
         abortController = ac;
         isGenerating = true;
         error = null;
-        generations = ["", "", ""];
+        pendingFacets = ["", "", ""];
+
+        // Build cumulative branch context for deeper nodes
+        const branchContext = resolveBranchContext(activeNodeId);
+
+        // For the LLM: if we have branch context from the tree, prepend it
+        const effectiveSelectedText = branchContext
+            ? (isRewrite ? selectedText : "")
+            : selectedText;
+        const effectiveContent = branchContext
+            ? branchContext + "\n\n" + fullContent
+            : fullContent;
 
         try {
-            await executePolisherGeneration({
+            const result = await executePolisherGeneration({
                 projectId,
-                selectedText,
-                fullContent,
-                cursorPos,
+                selectedText: effectiveSelectedText,
+                fullContent: effectiveContent,
+                cursorPos: branchContext ? effectiveContent.length : cursorPos,
                 abortSignal: ac.signal,
                 count: 3,
                 onDelta: (index, delta) => {
-                    generations[index] += delta;
+                    pendingFacets[index] += delta;
                 },
             });
+
+            // Commit results as child nodes of the active node
+            for (const text of result.generations) {
+                if (!text.trim()) continue;
+                const child: GemNode = {
+                    id: makeId(),
+                    parentId: activeNodeId,
+                    text,
+                    children: [],
+                };
+                activeNode.children.push(child);
+                nodeIndex.set(child.id, child);
+            }
         } catch (e: any) {
             if (e?.name !== "AbortError") {
                 error = e?.message || String(e);
@@ -76,13 +171,31 @@
         }
     }
 
+    function selectNode(id: string) {
+        activeNodeId = id;
+    }
+
+    function focusNode(id: string) {
+        rootViewId = id;
+    }
+
     function useGeneration(index: number) {
-        polishedText += (polishedText ? "\n" : "") + generations[index];
+        const text = displayFacets[index];
+        if (!text) return;
+        polishedText += (polishedText ? "\n" : "") + text;
         tick().then(() => {
             if (polishAreaRef) {
                 polishAreaRef.scrollTop = polishAreaRef.scrollHeight;
             }
         });
+    }
+
+    /** Select a child facet node and drill down into it for further generation. */
+    function drillInto(index: number) {
+        const child = activeNode.children[index];
+        if (!child) return;
+        activeNodeId = child.id;
+        showGems = true;
     }
 
     function handleApply() {
@@ -102,7 +215,7 @@
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
-        class="flex h-[85vh] w-[95vw] max-w-6xl flex-col border border-cyan-600/50 bg-[#020005] shadow-2xl shadow-cyan-900/20 rounded-lg overflow-hidden"
+        class="flex h-[85vh] w-[95vw] max-w-7xl flex-col border border-cyan-600/50 bg-[#020005] shadow-2xl shadow-cyan-900/20 rounded-lg overflow-hidden"
         onclick={(e) => e.stopPropagation()}
         transition:scale={{ duration: 300, start: 0.95, easing: backOut }}
     >
@@ -118,13 +231,26 @@
                 </span>
             </div>
             <div class="flex items-center gap-2">
+                <!-- Gems toggle -->
+                <button
+                    onclick={() => showGems = !showGems}
+                    class="flex items-center gap-1.5 border border-cyan-800/50 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest transition-colors rounded-md
+                        {showGems ? 'bg-cyan-900/40 text-cyan-200 border-cyan-600/60' : 'bg-transparent text-cyan-600 hover:text-cyan-400 hover:border-cyan-700'}"
+                >
+                    {#if showGems}
+                        <PanelLeftClose size={11} />
+                    {:else}
+                        <PanelLeftOpen size={11} />
+                    {/if}
+                    Gems
+                </button>
                 <button
                     onclick={generate}
                     disabled={isGenerating}
                     class="flex items-center gap-1.5 border border-cyan-700/60 bg-cyan-950/40 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-cyan-300 hover:border-cyan-500 hover:text-cyan-100 transition-colors rounded-md disabled:opacity-50"
                 >
                     <RotateCw size={11} class={isGenerating ? "animate-spin" : ""} />
-                    {isGenerating ? "Generating..." : "Generate More"}
+                    {isGenerating ? "Generating..." : "Generate Facets"}
                 </button>
                 <button
                     onclick={onClose}
@@ -135,22 +261,63 @@
             </div>
         </div>
 
-        <!-- Body -->
-        <div class="flex flex-1 min-h-0 divide-x divide-cyan-800/30">
-            <!-- Left Column: Generation Cards -->
-            <div class="w-[55%] flex flex-col min-h-0 bg-[#030008]">
-                <div class="px-4 py-2 border-b border-cyan-900/30">
-                    <span class="text-[9px] uppercase tracking-widest text-cyan-600 font-bold">Facets</span>
-                    <span class="text-[9px] text-cyan-800 ml-2">Click a card to add it to the polishing wheel</span>
+        <!-- Body: 3-pane layout -->
+        <div class="flex flex-1 min-h-0">
+            <!-- Pane 1: Gems Tree (collapsible left) -->
+            {#if showGems}
+                <div class="w-56 shrink-0 flex flex-col min-h-0 bg-[#010003] border-r border-cyan-800/30">
+                    <div class="px-3 py-2 border-b border-cyan-900/30 flex items-center justify-between">
+                        <span class="text-[9px] uppercase tracking-widest text-cyan-600 font-bold">Gem Tree</span>
+                        {#if rootViewId}
+                            <button
+                                onclick={zoomOut}
+                                class="flex items-center gap-1 text-[9px] text-cyan-600 hover:text-cyan-300 transition-colors"
+                            >
+                                <ZoomOut size={10} />
+                                Zoom Out
+                            </button>
+                        {/if}
+                    </div>
+                    <div class="flex-1 overflow-y-auto p-2">
+                        <PolisherTree
+                            node={findViewRoot()}
+                            {activeNodeId}
+                            onSelect={selectNode}
+                            onFocus={focusNode}
+                        />
+                    </div>
+                </div>
+            {/if}
+
+            <!-- Pane 2: Facets (middle) -->
+            <div class="flex-1 flex flex-col min-h-0 bg-[#030008] border-r border-cyan-800/30">
+                <div class="px-4 py-2 border-b border-cyan-900/30 flex items-center justify-between">
+                    <div>
+                        <span class="text-[9px] uppercase tracking-widest text-cyan-600 font-bold">Facets</span>
+                        {#if activeNode.parentId !== null}
+                            <span class="text-[9px] text-cyan-800 ml-2">
+                                from: {activeNode.text ? activeNode.text.slice(0, 30) + '...' : 'node'}
+                            </span>
+                        {/if}
+                    </div>
+                    <span class="text-[9px] text-cyan-800">Click Use or Drill to branch deeper</span>
                 </div>
                 <div class="flex-1 overflow-y-auto p-4 space-y-3">
-                    {#each generations as gen, i}
+                    {#each displayFacets as gen, i}
                         <div class="group border border-cyan-800/30 bg-black/40 rounded-lg overflow-hidden hover:border-cyan-600/50 transition-colors">
                             <div class="flex items-center justify-between px-3 py-1.5 border-b border-cyan-900/20 bg-cyan-950/20">
                                 <span class="text-[9px] uppercase tracking-widest text-cyan-600 font-bold">
                                     Facet {i + 1}
                                 </span>
                                 <div class="flex gap-1.5">
+                                    {#if !isGenerating && activeNode.children[i]}
+                                        <button
+                                            onclick={() => drillInto(i)}
+                                            class="text-[9px] uppercase tracking-widest text-cyan-700 hover:text-cyan-300 transition-colors px-2 py-0.5 border border-transparent hover:border-cyan-700/50 rounded"
+                                        >
+                                            Drill
+                                        </button>
+                                    {/if}
                                     <button
                                         onclick={() => useGeneration(i)}
                                         disabled={!gen}
@@ -183,8 +350,8 @@
                 </div>
             </div>
 
-            <!-- Right Column: Polishing Wheel -->
-            <div class="w-[45%] flex flex-col min-h-0 bg-[#020005]">
+            <!-- Pane 3: Polishing Wheel (right) -->
+            <div class="w-[35%] shrink-0 flex flex-col min-h-0 bg-[#020005]">
                 <div class="px-4 py-2 border-b border-cyan-900/30 flex items-center justify-between">
                     <div>
                         <span class="text-[9px] uppercase tracking-widest text-cyan-600 font-bold">Polishing Wheel</span>
