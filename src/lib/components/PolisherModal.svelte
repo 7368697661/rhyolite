@@ -38,14 +38,22 @@
         children: [],
     });
 
-    /** Flat index for fast lookup — kept in sync manually. */
-    let nodeIndex = $state<Map<string, GemNode>>(new Map([[rootNode.id, rootNode]]));
-
     let activeNodeId = $state(rootNode.id);
     let rootViewId = $state<string | null>(null); // null = show full tree
     let showGems = $state(false);
 
-    let activeNode = $derived(nodeIndex.get(activeNodeId) ?? rootNode);
+    /** Recursive lookup on the $state tree — fully reactive. */
+    function findNode(id: string, node: GemNode = rootNode): GemNode | undefined {
+        if (node.id === id) return node;
+        for (const child of node.children) {
+            const found = findNode(id, child);
+            if (found) return found;
+        }
+        return undefined;
+    }
+
+    let activeNode = $derived(findNode(activeNodeId) ?? rootNode);
+    let viewRoot = $derived(rootViewId ? (findNode(rootViewId) ?? rootNode) : rootNode);
 
     // ---------------------------------------------------------------------------
     // Generation state
@@ -74,10 +82,10 @@
 
     function resolveBranchContext(nodeId: string): string {
         const path: string[] = [];
-        let current = nodeIndex.get(nodeId);
+        let current = findNode(nodeId);
         while (current) {
             if (current.text) path.unshift(current.text);
-            current = current.parentId ? nodeIndex.get(current.parentId) : undefined;
+            current = current.parentId ? findNode(current.parentId) : undefined;
         }
         return path.join("\n\n");
     }
@@ -86,17 +94,10 @@
     // Tree helpers
     // ---------------------------------------------------------------------------
 
-    function findViewRoot(): GemNode {
-        if (rootViewId) {
-            return nodeIndex.get(rootViewId) ?? rootNode;
-        }
-        return rootNode;
-    }
-
     function zoomOut() {
         if (!rootViewId) return;
-        const viewRoot = nodeIndex.get(rootViewId);
-        rootViewId = viewRoot?.parentId ?? null;
+        const vr = findNode(rootViewId);
+        rootViewId = vr?.parentId ?? null;
     }
 
     // ---------------------------------------------------------------------------
@@ -151,6 +152,7 @@
             });
 
             // Commit results as child nodes of the active node
+            const target = findNode(activeNodeId) ?? rootNode;
             for (const text of result.generations) {
                 if (!text.trim()) continue;
                 const child: GemNode = {
@@ -159,8 +161,7 @@
                     text,
                     children: [],
                 };
-                activeNode.children.push(child);
-                nodeIndex.set(child.id, child);
+                target.children.push(child);
             }
         } catch (e: any) {
             if (e?.name !== "AbortError") {
@@ -196,6 +197,10 @@
         if (!child) return;
         activeNodeId = child.id;
         showGems = true;
+        // Auto-generate if this node has no children yet
+        if (child.children.length === 0) {
+            generate();
+        }
     }
 
     function handleApply() {
@@ -280,7 +285,7 @@
                     </div>
                     <div class="flex-1 overflow-y-auto p-2">
                         <PolisherTree
-                            node={findViewRoot()}
+                            node={viewRoot}
                             {activeNodeId}
                             onSelect={selectNode}
                             onFocus={focusNode}
