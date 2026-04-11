@@ -6,7 +6,7 @@ export type FsWikiEntry = { id: string; title: string; content: string; aliases:
 export type FsTimelineEvent = { id: string; title: string; description: string; date: string; content?: string; summary?: string; nodeType?: string; tags?: string[]; passFullContent?: boolean; referenceId?: string; referenceType?: string; positionX: number; positionY: number; color?: string | null; };
 export type FsEventEdge = { id: string; source: string; target: string; label: string; };
 export type FsTimeline = { id: string; title: string; projectId: string; events: FsTimelineEvent[]; edges: FsEventEdge[]; createdAt?: string; updatedAt?: string; };
-export type FsGlyph = { id: string; name: string; provider: string; model: string; temperature: number; outputLength: number; maxOutputTokens?: number; isSculpter: boolean; specialistRole?: string; systemInstruction?: string; role?: string; isCompletionModel?: boolean; isPolisherEngine?: boolean; pipeline?: string[]; };
+export type FsGlyph = { id: string; name: string; provider?: string; model: string; temperature: number; outputLength: number; maxOutputTokens?: number; isSculpter: boolean; specialistRole?: string; systemInstruction?: string; role?: string; isCompletionModel?: boolean; isPolisherEngine?: boolean; pipeline?: string[]; };
 
 export type FsChatMessage = {
     id: string;

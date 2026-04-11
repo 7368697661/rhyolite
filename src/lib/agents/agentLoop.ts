@@ -198,7 +198,15 @@ async function runSpecialistInnerLoop(
     (t) => t.schema.name !== "delegate_to_specialist" && t.schema.name !== "delegate_fan_out"
   );
 
-  if (glyph.provider === "gemini") {
+  // Glyphs saved via the UI do not persist a `provider` field (the Rust
+  // FsGlyph struct only stores `role`, `model`, etc.), so anything missing
+  // should be treated as Gemini — matching Chat.svelte's sculptor fallback.
+  // Similarly, `systemInstruction` is absent for UI-created glyphs; the real
+  // system prompt lives in `glyph.role`.
+  const effectiveProvider = (glyph.provider || "gemini") as "gemini" | "openai" | "anthropic";
+  const effectiveSystemInstruction = glyph.systemInstruction || glyph.role || "";
+
+  if (effectiveProvider === "gemini") {
     const apiKey = await getApiKey();
     const ai = new GoogleGenAI({ apiKey });
     const safetySettings = getSafetySettings("none");
@@ -220,7 +228,7 @@ async function runSpecialistInnerLoop(
           model: glyph.model,
           contents,
           config: {
-            systemInstruction: glyph.systemInstruction,
+            systemInstruction: effectiveSystemInstruction,
             temperature: glyph.temperature,
             maxOutputTokens: glyph.maxOutputTokens,
             abortSignal,
@@ -313,12 +321,15 @@ async function runSpecialistInnerLoop(
       contents.push({ role: "user", parts: responseParts });
     }
   } else {
-    // Non-Gemini specialist: single-pass generation
+    // Non-Gemini specialist: single-pass generation (no native tool calling).
+    // Note: if you reach this branch with a chisel that's supposed to use
+    // draft-writing tools, the chisel won't actually call them — rely on the
+    // auto-persist path in runChiselPipeline for the writer's output.
     const { streamModel } = await import("./providers");
     const deltas = await streamModel({
-      provider: glyph.provider as "gemini" | "openai" | "anthropic",
+      provider: effectiveProvider,
       model: glyph.model,
-      systemInstruction: glyph.systemInstruction,
+      systemInstruction: effectiveSystemInstruction,
       messages: [{ role: "user", content: task }],
       temperature: glyph.temperature,
       maxOutputTokens: glyph.maxOutputTokens,
@@ -428,8 +439,9 @@ async function runChiselPipeline(
   result: AgentLoopResult,
   label: string,
   useRoleTools = false
-): Promise<string> {
+): Promise<{ cumulativeContext: string; writerRan: boolean }> {
   let cumulativeContext = "";
+  let writerRan = false;
   const lastUserMsg = finalMessages[finalMessages.length - 1]?.content || "";
   // The full message may have RAG context prepended (wiki, draft, etc.).
   // Extract just the user's original request so downstream steps (writer,
@@ -444,6 +456,22 @@ async function runChiselPipeline(
   const allGlyphs = await readGlyphs();
   const allChisels = allGlyphs.filter(g => !g.isSculpter && g.specialistRole);
 
+  // Pre-fetch the active document ONCE. The writer needs to see existing
+  // content to avoid clobbering it, and the auditor benefits from the same
+  // context if it can't call read_draft (non-Gemini path). We read once at
+  // the start rather than per-step because the pipeline stages may mutate
+  // the draft — each stage reads fresh via its own tools when needed.
+  let existingDraft = "";
+  if (useRoleTools && params.toolContext.documentId && params.toolContext.projectId) {
+    try {
+      const { readDocument } = await import("./fs-db");
+      const doc = await readDocument(params.toolContext.projectId, params.toolContext.documentId);
+      if (doc?.content?.trim()) existingDraft = doc.content;
+    } catch {
+      /* best effort — if read fails, writer will operate without existing-draft context */
+    }
+  }
+
   for (let i = 0; i < pipelineTags.length; i++) {
     if (params.abortSignal?.aborted) break;
 
@@ -456,8 +484,10 @@ async function runChiselPipeline(
 
     // Role-specific instructions so each chisel stays in its lane.
     // The writer instruction adapts based on whether the chisel's provider
-    // supports tool calling (Gemini) or not (everything else).
-    const canCallTools = chisel.provider === "gemini";
+    // supports tool calling (Gemini) or not (everything else). UI-created
+    // glyphs don't persist a `provider` field, so absence defaults to Gemini
+    // — matching the fallback in runSpecialistInnerLoop.
+    const canCallTools = (chisel.provider || "gemini") === "gemini";
     const WRITER_INSTRUCTION_TOOLS = "YOUR ROLE: WRITER. Using the research context provided, write the requested content. Call write_draft ONCE with the complete text. Do NOT call write_draft multiple times or loop — produce the full content in a single tool call. If the document already has content you are continuing from, first read_draft to see what exists, then use write_draft with the existing content plus your new content combined. Focus on prose quality, voice, and narrative flow. FORMATTING: Write plain prose paragraphs. Do NOT use markdown blockquote syntax (> lines) for narrative text. Only use > blockquotes for actual attributed quotes or epigraphs. Chapter body text should be plain paragraphs separated by blank lines — no markdown heading markers, no blockquote prefixes, no bullet lists unless the user specifically asks for them.";
     const WRITER_INSTRUCTION_NO_TOOLS = "YOUR ROLE: WRITER. Using the research context provided, write the requested content. Output ONLY the prose content — your entire response will be saved directly as the document body. Do NOT wrap your output in code blocks, JSON, markdown formatting, or any meta-commentary. Do NOT include tool call syntax, function names, or parameter labels. Just write the story/content directly as plain prose paragraphs separated by blank lines. Focus on prose quality, voice, and narrative flow. Do NOT use markdown blockquote syntax (> lines) for narrative text. Only use > blockquotes for actual attributed quotes or epigraphs. No markdown heading markers, no bullet lists unless the user specifically asks for them.";
     const ROLE_INSTRUCTIONS: Record<string, string> = {
@@ -472,7 +502,15 @@ async function runChiselPipeline(
     // distilled lore/context they need, so feeding them raw RAG on top of
     // that causes duplication in the prose.
     const prompt = tag === "researcher" ? taskPromptFull : taskPromptClean;
-    const chiselTask = `[PIPELINE STEP ${i + 1}/${pipelineTags.length} - ${tag.toUpperCase()}]${roleInstruction}\n${prompt}\n\n[CONTEXT FROM PREVIOUS STEPS]\n${cumulativeContext}`;
+
+    // For the writer, include the existing draft so it can decide whether to
+    // continue, expand, or rewrite. Without this, a non-Gemini writer (or any
+    // writer that doesn't call read_draft first) would blindly overwrite
+    // existing content — nuking prior chapters when asked to "continue".
+    const draftSection = (tag === "writer" && existingDraft)
+      ? `\n\n[EXISTING DRAFT CONTENT]\n${existingDraft}\n[END EXISTING DRAFT]\n\nIMPORTANT: Your output will replace the entire document. If the user is asking you to continue, expand, or refine the existing content, include the parts you want to preserve verbatim in your output. If the user is asking for a fresh rewrite, ignore the existing content.`
+      : "";
+    const chiselTask = `[PIPELINE STEP ${i + 1}/${pipelineTags.length} - ${tag.toUpperCase()}]${roleInstruction}\n${prompt}${draftSection}\n\n[CONTEXT FROM PREVIOUS STEPS]\n${cumulativeContext}`;
     emit({ t: "s", d: `[${label} PIPELINE] Starting step ${i + 1}/${pipelineTags.length}: ${chisel.name} (${tag})` });
 
     const roleTools = useRoleTools ? (toolsForRole(tag) ?? undefined) : undefined;
@@ -484,26 +522,34 @@ async function runChiselPipeline(
       const { summary, toolCallNames } = await runSpecialistInnerLoop(chisel, chiselTask, params.toolContext, emit, params.abortSignal, roleTools);
       cumulativeContext += `\n\n--- OUTPUT FROM ${tag.toUpperCase()} ---\n${summary}`;
 
-      // If the writer produced content but never called write_draft (e.g. non-Gemini
-      // provider with no tool-calling support, or the model simply didn't use the tool),
-      // persist the output to the document automatically.
-      if (
-        useRoleTools &&
-        tag === "writer" &&
-        !toolCallNames.includes("write_draft") &&
-        summary.trim() &&
-        params.toolContext.documentId
-      ) {
-        const cleanedText = stripCodeBlockWrappers(summary);
-        if (cleanedText) {
-          const writeTool = TOOL_MAP.get("write_draft");
-          if (writeTool) {
-            try {
-              await writeTool.execute({ text: cleanedText }, params.toolContext);
-            } catch (writeErr: any) {
-              emit({ t: "s", d: `[${label} PIPELINE] Auto-persist failed: ${writeErr.message}` });
+      if (useRoleTools && tag === "writer") {
+        const wroteViaTool = toolCallNames.includes("write_draft") || toolCallNames.includes("append_to_draft");
+
+        // If the writer produced content but never called write_draft (e.g. non-Gemini
+        // provider with no tool-calling support, or the model simply didn't use the tool),
+        // persist the output to the document automatically. The writer was given the
+        // existing draft content as context and told its output will become the full
+        // document, so overwriting is safe by design.
+        if (
+          !wroteViaTool &&
+          summary.trim() &&
+          params.toolContext.documentId
+        ) {
+          const cleanedText = stripCodeBlockWrappers(summary);
+          if (cleanedText) {
+            const writeTool = TOOL_MAP.get("write_draft");
+            if (writeTool) {
+              try {
+                const writeResult = await writeTool.execute({ text: cleanedText }, params.toolContext);
+                if (writeResult.ok) writerRan = true;
+                else emit({ t: "s", d: `[${label} PIPELINE] Auto-persist failed: ${writeResult.error}` });
+              } catch (writeErr: any) {
+                emit({ t: "s", d: `[${label} PIPELINE] Auto-persist failed: ${writeErr.message}` });
+              }
             }
           }
+        } else if (wroteViaTool) {
+          writerRan = true;
         }
       }
 
@@ -516,7 +562,7 @@ async function runChiselPipeline(
     }
   }
 
-  return cumulativeContext;
+  return { cumulativeContext, writerRan };
 }
 
 function injectPipelineResults(
@@ -628,7 +674,7 @@ export async function runAgentLoop(
   if (effectiveParams.mode === "research" && params.glyphId) {
     const activeGlyph = await getGlyph(params.glyphId);
     if (activeGlyph && activeGlyph.pipeline && activeGlyph.pipeline.length > 0) {
-      const cumulativeContext = await runChiselPipeline(
+      const { cumulativeContext } = await runChiselPipeline(
         activeGlyph.pipeline, params, finalMessages, emit, result, "RESEARCH"
       );
       injectPipelineResults(finalMessages, cumulativeContext, "RESEARCH");
@@ -641,22 +687,49 @@ export async function runAgentLoop(
   if (effectiveParams.mode === "write") {
     if (!params.glyphId) {
       emit({ t: "s", d: `[WRITE PIPELINE] No sculptor selected — falling back to standard generation.` });
+    } else if (!params.toolContext.documentId) {
+      emit({ t: "s", d: `[WRITE PIPELINE] No active document. Open or create a document before running Write mode — the writer and auditor need a draft target.` });
     } else {
-      const WRITE_PIPELINE = ["researcher", "writer", "auditor"];
-      const cumulativeContext = await runChiselPipeline(
-        WRITE_PIPELINE, params, finalMessages, emit, result, "WRITE", true
+      // Pre-flight: verify the required writer chisel exists. Without a writer,
+      // running the pipeline would produce researcher brief + auditor commentary
+      // but never actually change the document, then strip tools from the
+      // sculptor — a silent failure. Fail fast with a clear error instead.
+      const allGlyphs = await readGlyphs();
+      const availableTags = new Set(
+        allGlyphs.filter(g => !g.isSculpter && g.specialistRole).map(g => g.specialistRole!)
       );
-      if (!cumulativeContext.trim()) {
-        emit({ t: "s", d: `[WRITE PIPELINE] No chisels tagged researcher/writer/auditor found. Create them in the Glyphs registry.` });
+      const WRITE_PIPELINE = ["researcher", "writer", "auditor"];
+      const missingTags = WRITE_PIPELINE.filter(t => !availableTags.has(t));
+
+      if (!availableTags.has("writer")) {
+        emit({ t: "s", d: `[WRITE PIPELINE] Missing required 'writer' chisel. Create a Glyph in the Glyph Registry, uncheck "Sculptor", and set Chisel Tag to "writer". Falling back to standard generation.` });
       } else {
-        // Pipeline chisels already wrote to the document via write_draft.
-        // Tell the sculptor to just summarize — do NOT re-output content or call tools.
-        const lastIdx = finalMessages.length - 1;
-        if (finalMessages[lastIdx].role === "user") {
-          finalMessages[lastIdx].content += `\n\n[WRITE PIPELINE COMPLETE]\nYour specialist sub-agents (researcher, writer, auditor) have finished. The content has already been written to the document via write_draft. Do NOT call write_draft again. Do NOT paste, repeat, or quote the written content in your reply. Reply ONLY with a short summary (2-4 sentences) of what was written and any issues the auditor flagged. Keep your response concise.`;
+        if (missingTags.length > 0) {
+          emit({ t: "s", d: `[WRITE PIPELINE] Optional chisel tags missing: ${missingTags.join(", ")}. Those stages will be skipped.` });
         }
-        // Strip tools so the sculptor can only summarize
-        tools = [];
+        const { cumulativeContext, writerRan } = await runChiselPipeline(
+          WRITE_PIPELINE, params, finalMessages, emit, result, "WRITE", true
+        );
+
+        if (!writerRan) {
+          emit({ t: "s", d: `[WRITE PIPELINE] Writer chisel did not produce any output — document was not modified. Check the writer's system prompt and model configuration.` });
+        } else {
+          // Inject the full pipeline context so the sculptor can actually
+          // summarize what happened. Previously the sculptor had tools stripped
+          // AND no context, so it had to hallucinate the summary.
+          const lastIdx = finalMessages.length - 1;
+          if (finalMessages[lastIdx].role === "user") {
+            finalMessages[lastIdx].content += `\n\n[WRITE PIPELINE COMPLETE]\nYour specialist sub-agents (researcher, writer, auditor) have finished running. The writer has already updated the active document, and the auditor has applied any targeted fixes it found.
+
+[PIPELINE RESULTS]
+${cumulativeContext}
+
+[YOUR TASK]
+Do NOT call write_draft, append_to_draft, replace_in_draft, or any other writing tool — your sub-agents handled that. Respond ONLY with a short summary (2-4 sentences) of what was written, based on the pipeline results above. Mention any issues the auditor flagged. Keep your response concise. Do NOT paste, repeat, or quote the written prose.`;
+          }
+          // Strip tools so the sculptor can only summarize
+          tools = [];
+        }
       }
     }
   }
