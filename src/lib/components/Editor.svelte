@@ -2,13 +2,22 @@
     import { appState } from '$lib/state.svelte';
     import { marked } from 'marked';
     import DOMPurify from 'dompurify';
+
+    // Allow #entity: protocol links through DOMPurify
+    DOMPurify.addHook('uponSanitizeAttribute', (node, data) => {
+        if (data.attrName === 'href' && data.attrValue.startsWith('#entity:')) {
+            data.forceKeepAttr = true;
+        }
+    });
+
     import { invoke } from '@tauri-apps/api/core';
     import { extractEntityMentions, extractWikilinks } from '$lib/editor/entityExtractor';
     import { TOOL_MAP, type ToolContext } from '$lib/agents/agentTools';
     import { executeInfill } from '$lib/agents/infill';
     import { embedSingleEntry } from '$lib/agents/embeddings';
-    import { Lightbulb, Link as LinkIcon, Hash, Type } from 'lucide-svelte';
+    import { Lightbulb, Link as LinkIcon, Hash, Type, Eye, PenLine, Bold, Italic, Heading, List, Quote, Minus } from 'lucide-svelte';
     import { tick } from 'svelte';
+    import { slide, fade } from 'svelte/transition';
     import PolisherModal from './PolisherModal.svelte';
     
     let content = $state("");
@@ -25,21 +34,29 @@
     let isInfilling = $state(false);
     let textareaRef = $state<HTMLTextAreaElement | null>(null);
 
+    // View mode: 'split' (both panes), 'write' (editor only), 'read' (preview only)
+    let viewMode = $state<'split' | 'write' | 'read'>('split');
+
     // Polisher state
     let isPolisherOpen = $state(false);
     let polisherSelection = $state<{ start: number; end: number; text: string } | null>(null);
 
+    let lastContentVersion = 0;
+
     $effect(() => {
-        // Only run when the selected file changes, not when content updates
-        if (appState.activeItem?.id !== activeItemId) {
-            activeItemId = appState.activeItem?.id || null;
-            
-            let itemData = appState.activeItem?.type === 'document' 
+        const id = appState.activeItem?.id;
+        const version = appState.contentVersion;
+        // Refresh when selected file changes OR when content was updated externally (agent wrote to it)
+        if (id !== activeItemId || version !== lastContentVersion) {
+            activeItemId = id || null;
+            lastContentVersion = version;
+
+            let itemData = appState.activeItem?.type === 'document'
                 ? appState.documents.find(d => d.id === appState.activeItem?.id)
                 : appState.activeItem?.type === 'wiki'
                     ? appState.wikiEntries.find(w => w.id === appState.activeItem?.id)
                     : null;
-            
+
             if (itemData) {
                 content = itemData.content || "";
                 title = itemData.title || "";
@@ -180,11 +197,73 @@
         selection = null;
     }
 
+    function wrapSelection(before: string, after: string) {
+        if (!textareaRef) return;
+        const start = textareaRef.selectionStart;
+        const end = textareaRef.selectionEnd;
+        const sel = content.substring(start, end);
+        const wrapped = before + sel + after;
+        content = content.substring(0, start) + wrapped + content.substring(end);
+        tick().then(() => {
+            if (!textareaRef) return;
+            textareaRef.selectionStart = start + before.length;
+            textareaRef.selectionEnd = start + before.length + sel.length;
+            textareaRef.focus();
+        });
+        debouncedSave();
+    }
+
+    function insertLinePrefix(prefix: string) {
+        if (!textareaRef) return;
+        const start = textareaRef.selectionStart;
+        // Find line start
+        const lineStart = content.lastIndexOf('\n', start - 1) + 1;
+        content = content.substring(0, lineStart) + prefix + content.substring(lineStart);
+        tick().then(() => {
+            if (!textareaRef) return;
+            textareaRef.selectionStart = textareaRef.selectionEnd = start + prefix.length;
+            textareaRef.focus();
+        });
+        debouncedSave();
+    }
+
     function handleEditorKeydown(e: KeyboardEvent) {
+        const mod = e.metaKey || e.ctrlKey;
         // Cmd/Ctrl+Shift+P → Open The Polisher
-        if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'P') {
+        if (mod && e.shiftKey && e.key === 'P') {
             e.preventDefault();
             openPolisher();
+            return;
+        }
+        // Cmd+B → Bold
+        if (mod && e.key === 'b') {
+            e.preventDefault();
+            wrapSelection('**', '**');
+            return;
+        }
+        // Cmd+I → Italic
+        if (mod && e.key === 'i') {
+            e.preventDefault();
+            wrapSelection('*', '*');
+            return;
+        }
+        // Cmd+Shift+H → Heading
+        if (mod && e.shiftKey && (e.key === 'H' || e.key === 'h')) {
+            e.preventDefault();
+            insertLinePrefix('## ');
+            return;
+        }
+        // Cmd+Shift+Q → Blockquote
+        if (mod && e.shiftKey && (e.key === 'Q' || e.key === 'q')) {
+            e.preventDefault();
+            insertLinePrefix('> ');
+            return;
+        }
+        // Cmd+K → Link
+        if (mod && e.key === 'k') {
+            e.preventDefault();
+            wrapSelection('[', '](url)');
+            return;
         }
     }
 
@@ -221,34 +300,40 @@
         };
         
         // Custom blockquote for Obsidian callouts
+        // marked v15 passes raw text (not rendered HTML) to blockquote renderer
         renderer.blockquote = function({ text }) {
-            const match = text.match(/^<p>\[!(\w+)\](.*?)(?:<\/p>|<br>|\n)([\s\S]*)/i);
+            const trimmed = text.trim();
+            // Match callout syntax: [!type] optional title\nbody
+            const match = trimmed.match(/^\[!(\w+)\](.*?)(?:\n([\s\S]*))?$/i);
             if (match) {
                 const type = match[1].toLowerCase();
-                const rawTitle = match[2].trim();
-                const content = match[3] || '';
-                const displayContent = content.replace(/^[\n\r]+/, '').trim();
+                const rawTitle = (match[2] || '').trim();
+                const rawBody = (match[3] || '').trim();
+                // Render inline markdown in title and body
+                const renderedTitle = rawTitle ? marked.parseInline(rawTitle, { gfm: true, renderer }) : '';
+                const renderedBody = rawBody ? marked.parseInline(rawBody, { gfm: true, renderer }) : '';
 
                 if (type === 'quote') {
-                    const quoteTitle = rawTitle || '';
                     return `<div class="callout callout-quote my-6 p-6 border border-violet-700/40 bg-violet-950/30 rounded-2xl text-sm shadow-lg shadow-violet-950/20">
                         <div class="text-3xl text-violet-500/60 leading-none select-none mb-2">\u201C</div>
-                        <div class="italic leading-relaxed text-violet-200/90 text-base pl-2">${displayContent || ''}</div>
-                        ${quoteTitle ? `<div class="mt-3 pl-2 text-[10px] uppercase tracking-widest text-violet-500 font-bold">\u2014 ${quoteTitle}</div>` : ''}
+                        <div class="italic leading-relaxed text-violet-200/90 text-base pl-2">${renderedBody || renderedTitle}</div>
+                        ${renderedBody && renderedTitle ? `<div class="mt-3 pl-2 text-[10px] uppercase tracking-widest text-violet-500 font-bold">\u2014 ${renderedTitle}</div>` : ''}
                         <div class="text-3xl text-violet-500/60 leading-none select-none text-right mt-1">\u201D</div>
                     </div>`;
                 }
 
-                const titleDisplay = rawTitle || type.charAt(0).toUpperCase() + type.slice(1);
+                const titleDisplay = renderedTitle || type.charAt(0).toUpperCase() + type.slice(1);
                 return `<div class="callout my-6 p-6 border border-violet-700/40 bg-violet-950/30 rounded-2xl text-sm shadow-lg shadow-violet-950/20 backdrop-blur-sm">
                     <div class="font-bold text-violet-300 mb-3 tracking-widest uppercase text-xs flex items-center gap-2">
                         <span class="inline-block w-2 h-2 rounded-full bg-violet-500 shadow-[0_0_6px_rgba(139,92,246,0.6)]"></span>
                         ${titleDisplay}
                     </div>
-                    <div class="leading-relaxed text-violet-200/80">${displayContent}</div>
+                    <div class="leading-relaxed text-violet-200/80">${renderedBody}</div>
                 </div>`;
             }
-            return `<blockquote class="border border-violet-800/40 bg-violet-950/20 p-5 my-6 italic text-violet-300/80 rounded-2xl shadow-lg shadow-violet-950/10">${text}</blockquote>`;
+            // Regular blockquote — render inline markdown
+            const rendered = marked.parseInline(trimmed, { gfm: true, renderer });
+            return `<blockquote class="border border-violet-800/40 bg-violet-950/20 p-5 my-6 italic text-violet-300/80 rounded-2xl shadow-lg shadow-violet-950/10">${rendered}</blockquote>`;
         };
 
         // Custom heading styling with Nightingale
@@ -266,7 +351,7 @@
         };
 
         const html = marked.parse(preprocessed, { gfm: true, renderer }) as string;
-        return DOMPurify.sanitize(html);
+        return DOMPurify.sanitize(html, { ADD_ATTR: ['class', 'target', 'rel'] });
     });
 
     let wordCount = $derived(content.trim() ? content.trim().split(/\s+/).filter(w => w.length > 0).length : 0);
@@ -410,7 +495,7 @@
                         {resolveStatus}
                     </span>
                 {/if}
-                <button 
+                <button
                     onclick={handleResolveLinks}
                     disabled={deadLinks.length === 0 || isResolvingLinks}
                     class="border border-violet-800/80 bg-black px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-violet-400 hover:border-violet-500 hover:text-violet-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 rounded-md"
@@ -421,6 +506,29 @@
                         [ Resolve Links ({deadLinks.length}) ]
                     {/if}
                 </button>
+                <div class="flex items-center border border-violet-800/50 rounded-md overflow-hidden ml-1">
+                    <button
+                        onclick={() => viewMode = 'write'}
+                        class="px-2 py-1 text-[9px] uppercase tracking-widest font-bold transition-colors {viewMode === 'write' ? 'bg-violet-900/50 text-violet-200' : 'text-violet-600 hover:text-violet-400'}"
+                        title="Editor only"
+                    >
+                        <PenLine size={11} />
+                    </button>
+                    <button
+                        onclick={() => viewMode = 'split'}
+                        class="px-2 py-1 text-[9px] uppercase tracking-widest font-bold border-x border-violet-800/50 transition-colors {viewMode === 'split' ? 'bg-violet-900/50 text-violet-200' : 'text-violet-600 hover:text-violet-400'}"
+                        title="Split view"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="12" y1="3" x2="12" y2="21"/></svg>
+                    </button>
+                    <button
+                        onclick={() => viewMode = 'read'}
+                        class="px-2 py-1 text-[9px] uppercase tracking-widest font-bold transition-colors {viewMode === 'read' ? 'bg-violet-900/50 text-violet-200' : 'text-violet-600 hover:text-violet-400'}"
+                        title="Reader mode"
+                    >
+                        <Eye size={11} />
+                    </button>
+                </div>
             </div>
         </div>
         {#if isResolvingLinks && resolveProgress}
@@ -438,78 +546,114 @@
         {/if}
     </header>
 
-    <!-- Editor Split -->
-    <div class="flex flex-1 min-h-0 divide-x divide-violet-900/50">
-        <div class="flex-1 flex flex-col min-w-0 bg-[#050308]">
-            <textarea
-                bind:this={textareaRef}
-                bind:value={content}
-                oninput={debouncedSave}
-                onmouseup={handleSelection}
-                onkeyup={handleSelection}
-                onkeydown={handleEditorKeydown}
-                class="editor-textarea flex-1 resize-none bg-transparent p-6 text-[15px] leading-relaxed text-violet-100 outline-none placeholder:text-violet-800 focus:shadow-[inset_0_0_20px_rgba(139,92,246,0.05)]"
-                placeholder="Begin transmission..."
-                spellcheck="false"
-            ></textarea>
-            
-            <!-- Floating Action Bar -->
-            {#if selection && !isInfilling && !isInfillOpen && !isPolisherOpen}
-                <div class="absolute left-6 right-6 top-16 z-10 flex gap-2 justify-end pointer-events-none">
-                    <button
-                        type="button"
-                        onclick={() => isInfillOpen = true}
-                        class="pointer-events-auto border border-violet-500/70 bg-violet-950/90 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-violet-100 hover:border-violet-400 hover:bg-violet-600 transition-colors shadow-[0_0_20px_rgba(139,92,246,0.3)] backdrop-blur-sm"
-                    >
-                        Rewrite / Infill
-                    </button>
-                    <button
-                        type="button"
-                        onclick={openPolisher}
-                        class="pointer-events-auto border border-cyan-500/70 bg-cyan-950/90 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-cyan-100 hover:border-cyan-400 hover:bg-cyan-700 transition-colors shadow-[0_0_20px_rgba(6,182,212,0.3)] backdrop-blur-sm"
-                    >
-                        Polish
-                    </button>
-                </div>
-            {/if}
+    <!-- Formatting Toolbar -->
+    {#if viewMode !== 'read'}
+        <div class="flex items-center gap-0.5 px-4 py-1 border-b border-violet-900/40 bg-[#030008]">
+            <button onclick={() => wrapSelection('**', '**')} class="p-1.5 text-violet-600 hover:text-violet-300 hover:bg-violet-900/30 rounded transition-colors" title="Bold (Cmd+B)">
+                <Bold size={14} />
+            </button>
+            <button onclick={() => wrapSelection('*', '*')} class="p-1.5 text-violet-600 hover:text-violet-300 hover:bg-violet-900/30 rounded transition-colors" title="Italic (Cmd+I)">
+                <Italic size={14} />
+            </button>
+            <div class="w-px h-4 bg-violet-900/50 mx-1"></div>
+            <button onclick={() => insertLinePrefix('## ')} class="p-1.5 text-violet-600 hover:text-violet-300 hover:bg-violet-900/30 rounded transition-colors" title="Heading (Cmd+Shift+H)">
+                <Heading size={14} />
+            </button>
+            <button onclick={() => insertLinePrefix('> ')} class="p-1.5 text-violet-600 hover:text-violet-300 hover:bg-violet-900/30 rounded transition-colors" title="Quote (Cmd+Shift+Q)">
+                <Quote size={14} />
+            </button>
+            <button onclick={() => insertLinePrefix('- ')} class="p-1.5 text-violet-600 hover:text-violet-300 hover:bg-violet-900/30 rounded transition-colors" title="List">
+                <List size={14} />
+            </button>
+            <button onclick={() => insertLinePrefix('---\n')} class="p-1.5 text-violet-600 hover:text-violet-300 hover:bg-violet-900/30 rounded transition-colors" title="Horizontal Rule">
+                <Minus size={14} />
+            </button>
+            <div class="w-px h-4 bg-violet-900/50 mx-1"></div>
+            <button onclick={() => wrapSelection('[', '](url)')} class="p-1.5 text-violet-600 hover:text-violet-300 hover:bg-violet-900/30 rounded transition-colors" title="Link (Cmd+K)">
+                <LinkIcon size={14} />
+            </button>
+            <button onclick={() => wrapSelection('[[', ']]')} class="p-1.5 text-violet-600 hover:text-violet-300 hover:bg-violet-900/30 rounded transition-colors" title="Wiki Link">
+                <Hash size={14} />
+            </button>
+        </div>
+    {/if}
 
-            {#if isInfillOpen && selection}
-                <div class="absolute left-6 right-6 top-16 z-10 flex items-center gap-2 border border-violet-500/50 bg-black/90 p-2 shadow-[0_0_30px_rgba(139,92,246,0.4)] backdrop-blur-md">
-                    <input
-                        type="text"
-                        class="min-w-0 flex-1 border border-violet-700/60 bg-black px-3 py-2 text-xs font-mono text-violet-100 outline-none focus:border-violet-400 placeholder:text-violet-800"
-                        placeholder="Instruction (e.g. expand, tighten POV)"
-                        bind:value={infillInstruction}
-                        onkeydown={(e) => { if (e.key === "Enter") handleInfillSubmit(); }}
-                        disabled={isInfilling}
-                    />
-                    <button
-                        type="button"
-                        onclick={handleInfillSubmit}
-                        disabled={isInfilling}
-                        class="shrink-0 border border-violet-500/70 bg-violet-900/80 px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-violet-100 hover:bg-violet-600 disabled:opacity-50 transition-colors"
-                    >
-                        {isInfilling ? "Running..." : "Execute"}
-                    </button>
-                    <button
-                        type="button"
-                        onclick={() => { isInfillOpen = false; selection = null; }}
-                        disabled={isInfilling}
-                        class="shrink-0 px-3 py-2 text-violet-600 hover:text-red-400 font-bold transition-colors"
-                        aria-label="Close"
-                    >
-                        ×
-                    </button>
-                </div>
-            {/if}
-        </div>
-        <!-- svelte-ignore a11y_click_events_have_key_events -->
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div class="flex-1 flex flex-col min-w-0 bg-[#020005] overflow-y-auto" onclick={handlePreviewClick}>
-            <div class="preview-pane p-8 prose prose-invert prose-violet max-w-none font-sans text-base leading-loose text-violet-200/90 prose-headings:font-heading prose-headings:text-violet-100 prose-a:no-underline">
-                {@html renderedMarkdown}
+    <!-- Editor Split -->
+    <div class="flex flex-1 min-h-0">
+        {#if viewMode !== 'read'}
+            <div class="flex-1 flex flex-col min-w-0 bg-[#050308] relative {viewMode === 'split' ? 'border-r border-violet-900/50' : ''}">
+                <textarea
+                    bind:this={textareaRef}
+                    bind:value={content}
+                    oninput={debouncedSave}
+                    onmouseup={handleSelection}
+                    onkeyup={handleSelection}
+                    onkeydown={handleEditorKeydown}
+                    class="editor-textarea flex-1 resize-none bg-transparent p-8 {viewMode === 'write' ? 'max-w-3xl mx-auto w-full' : ''} text-lg font-serif leading-[1.9] text-violet-100/90 outline-none placeholder:text-violet-800 focus:shadow-[inset_0_0_20px_rgba(139,92,246,0.05)]"
+                    placeholder="Begin writing..."
+                    spellcheck="false"
+                ></textarea>
+
+                <!-- Floating Action Bar -->
+                {#if selection && !isInfilling && !isInfillOpen && !isPolisherOpen}
+                    <div class="absolute left-6 right-6 top-4 z-10 flex gap-2 justify-end pointer-events-none" transition:fade={{ duration: 150 }}>
+                        <button
+                            type="button"
+                            onclick={() => isInfillOpen = true}
+                            class="pointer-events-auto border border-violet-500/70 bg-violet-950/90 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-violet-100 hover:border-violet-400 hover:bg-violet-600 transition-colors shadow-[0_0_20px_rgba(139,92,246,0.3)] backdrop-blur-sm rounded-md"
+                        >
+                            Rewrite / Infill
+                        </button>
+                        <button
+                            type="button"
+                            onclick={openPolisher}
+                            class="pointer-events-auto border border-cyan-500/70 bg-cyan-950/90 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-cyan-100 hover:border-cyan-400 hover:bg-cyan-700 transition-colors shadow-[0_0_20px_rgba(6,182,212,0.3)] backdrop-blur-sm rounded-md"
+                        >
+                            Polish
+                        </button>
+                    </div>
+                {/if}
+
+                {#if isInfillOpen && selection}
+                    <div class="absolute left-6 right-6 top-4 z-10 flex items-center gap-2 border border-violet-500/50 bg-black/90 p-2 shadow-[0_0_30px_rgba(139,92,246,0.4)] backdrop-blur-md rounded-lg" transition:fade={{ duration: 150 }}>
+                        <input
+                            type="text"
+                            class="min-w-0 flex-1 border border-violet-700/60 bg-black px-3 py-2 text-xs font-mono text-violet-100 outline-none focus:border-violet-400 placeholder:text-violet-800 rounded"
+                            placeholder="Instruction (e.g. expand, tighten POV)"
+                            bind:value={infillInstruction}
+                            onkeydown={(e) => { if (e.key === "Enter") handleInfillSubmit(); }}
+                            disabled={isInfilling}
+                        />
+                        <button
+                            type="button"
+                            onclick={handleInfillSubmit}
+                            disabled={isInfilling}
+                            class="shrink-0 border border-violet-500/70 bg-violet-900/80 px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-violet-100 hover:bg-violet-600 disabled:opacity-50 transition-colors rounded-md"
+                        >
+                            {isInfilling ? "Running..." : "Execute"}
+                        </button>
+                        <button
+                            type="button"
+                            onclick={() => { isInfillOpen = false; selection = null; }}
+                            disabled={isInfilling}
+                            class="shrink-0 px-3 py-2 text-violet-600 hover:text-red-400 font-bold transition-colors"
+                            aria-label="Close"
+                        >
+                            ×
+                        </button>
+                    </div>
+                {/if}
             </div>
-        </div>
+        {/if}
+        {#if viewMode !== 'write'}
+            <!-- svelte-ignore a11y_click_events_have_key_events -->
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div class="flex-1 flex flex-col min-w-0 bg-[#020005] overflow-y-auto" onclick={handlePreviewClick}>
+                <div class="preview-pane {viewMode === 'read' ? 'max-w-2xl mx-auto px-12 py-10' : 'p-8'} prose prose-invert prose-violet prose-lg max-w-none font-serif leading-[1.9] text-violet-200/90 prose-headings:font-heading prose-headings:text-violet-100 prose-a:no-underline">
+                    {@html renderedMarkdown}
+                </div>
+            </div>
+        {/if}
     </div>
 
     <!-- Editor Bottom Bar (spans full width) -->
@@ -633,5 +777,39 @@
     .editor-textarea {
         caret-shape: block;
         caret-color: rgb(167 139 250);
+        font-variation-settings: "SOFT" 100, "WONK" 1;
+    }
+
+    /* Fraunces SOFT axis for preview prose */
+    .preview-pane {
+        font-variation-settings: "SOFT" 100, "WONK" 1;
+    }
+
+    /* Reading mode: generous paragraph spacing and breathing room */
+    .preview-pane :global(p) {
+        margin-top: 1.1em;
+        margin-bottom: 1.1em;
+    }
+    .preview-pane :global(p + p) {
+        margin-top: 1.4em;
+    }
+    .preview-pane :global(br) {
+        display: block;
+        content: "";
+        margin-top: 0.6em;
+    }
+    .preview-pane :global(h1),
+    .preview-pane :global(h2),
+    .preview-pane :global(h3) {
+        margin-top: 2em;
+        margin-bottom: 0.8em;
+    }
+    .preview-pane :global(blockquote) {
+        margin-top: 1.5em;
+        margin-bottom: 1.5em;
+    }
+    .preview-pane :global(hr) {
+        margin-top: 2.5em;
+        margin-bottom: 2.5em;
     }
 </style>

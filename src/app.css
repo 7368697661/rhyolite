@@ -41,6 +41,21 @@
   src: url("/fonts/assistant.woff2") format("woff2");
 }
 
+@font-face {
+  font-family: "Fraunces";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/fraunces.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Fraunces";
+  font-style: italic;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/fraunces.woff2") format("woff2");
+}
+
 /*
  * Animated blobs must live on body pseudo-elements, not html::before:
  * body sat above html::before in the stack, so transparent body backgrounds
@@ -77,6 +92,21 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(139, 92, 246, 0.7);
   box-shadow: 0 0 10px rgba(139, 92, 246, 0.5);
+}
+
+/* Teal scrollbars for cyan/teal-themed elements (polisher, chisel cards, pipeline) */
+.teal-scrollbar::-webkit-scrollbar-track {
+  background: #000;
+  border-left: 1px solid rgba(6, 182, 212, 0.2);
+  border-top: 1px solid rgba(6, 182, 212, 0.2);
+}
+.teal-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(6, 182, 212, 0.3);
+  border: 1px solid rgba(6, 182, 212, 0.6);
+}
+.teal-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(6, 182, 212, 0.7);
+  box-shadow: 0 0 10px rgba(6, 182, 212, 0.5);
 }
 
 /* Terminal Selection: Solid Violet block, Black text */
@@ -180,10 +210,17 @@ body > * {
   z-index: 1;
 }
 
-/* Italic emphasis: Fraunces (loaded normal + italic via next/font in layout) */
+/* Fraunces: increase SOFT axis for rounder, warmer letterforms */
+.font-serif,
+[class*="font-serif"] {
+  font-variation-settings: "SOFT" 100, "WONK" 1;
+}
+
+/* Italic emphasis: Fraunces for beautiful italics */
 em,
 i {
-  font-family: var(--font-fraunces), ui-serif, Georgia, serif;
+  font-family: "Fraunces", ui-serif, Georgia, serif;
   font-style: italic;
+  font-variation-settings: "SOFT" 100, "WONK" 1;
 }
 

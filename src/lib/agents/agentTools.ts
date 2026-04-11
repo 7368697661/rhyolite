@@ -792,6 +792,105 @@ const appendToDraft: AgentTool = {
 };
 
 // ---------------------------------------------------------------------------
+// Tool: write_draft
+// ---------------------------------------------------------------------------
+
+const writeDraft: AgentTool = {
+  schema: {
+    name: "write_draft",
+    description:
+      "Overwrite the entire content of the active document/crystal. Use this to set the full draft content from scratch or to replace all existing content.",
+    parameters: {
+      type: "object",
+      properties: {
+        text: {
+          type: "string",
+          description: "The full text to write as the new document content",
+        },
+      },
+      required: ["text"],
+    },
+  },
+  riskLevel: "normal",
+  async execute(args, ctx) {
+    const text = String(args.text ?? "");
+    if (!text) return { ok: false, error: "text is required" };
+    const docId = ctx.documentId ?? "";
+    if (!docId) return { ok: false, error: "No active document" };
+    const doc = await readDocument(ctx.projectId, docId);
+    if (!doc) return { ok: false, error: `Document not found: ${docId}` };
+
+    const { writeDocument } = await import("./fs-db");
+    const previousLength = doc.content.length;
+    doc.content = text;
+    await writeDocument(ctx.projectId, doc);
+    return {
+      ok: true,
+      data: { id: doc.id, previousLength, newLength: text.length },
+    };
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Tool: replace_in_draft
+// ---------------------------------------------------------------------------
+
+const replaceInDraft: AgentTool = {
+  schema: {
+    name: "replace_in_draft",
+    description:
+      "Find and replace a section of text in the active document/crystal. Use this for targeted edits without rewriting the entire draft.",
+    parameters: {
+      type: "object",
+      properties: {
+        old_text: {
+          type: "string",
+          description:
+            "The exact text to find in the document. Must match exactly (including whitespace).",
+        },
+        new_text: {
+          type: "string",
+          description: "The replacement text",
+        },
+        replace_all: {
+          type: "boolean",
+          description:
+            "If true, replace all occurrences. Default: false (replace first occurrence only).",
+        },
+      },
+      required: ["old_text", "new_text"],
+    },
+  },
+  riskLevel: "normal",
+  async execute(args, ctx) {
+    const oldText = String(args.old_text ?? "");
+    const newText = String(args.new_text ?? "");
+    if (!oldText) return { ok: false, error: "old_text is required" };
+    const docId = ctx.documentId ?? "";
+    if (!docId) return { ok: false, error: "No active document" };
+    const doc = await readDocument(ctx.projectId, docId);
+    if (!doc) return { ok: false, error: `Document not found: ${docId}` };
+
+    if (!doc.content.includes(oldText)) {
+      return { ok: false, error: "old_text not found in document" };
+    }
+
+    const { writeDocument } = await import("./fs-db");
+    const replaceAll = Boolean(args.replace_all);
+    if (replaceAll) {
+      doc.content = doc.content.split(oldText).join(newText);
+    } else {
+      doc.content = doc.content.replace(oldText, newText);
+    }
+    await writeDocument(ctx.projectId, doc);
+    return {
+      ok: true,
+      data: { id: doc.id, newLength: doc.content.length },
+    };
+  },
+};
+
+// ---------------------------------------------------------------------------
 // Tool: search_project
 // ---------------------------------------------------------------------------
 
@@ -1352,6 +1451,8 @@ export const ALL_TOOLS: AgentTool[] = [
   deleteEdge,
   readDraft,
   appendToDraft,
+  writeDraft,
+  replaceInDraft,
   searchProject,
   resolveDeadLinks,
   delegateToSpecialist,

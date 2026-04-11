@@ -9,6 +9,7 @@
     import NodeEditor from './NodeEditor.svelte';
     import dagre from 'dagre';
     import { onMount, tick } from 'svelte';
+    import { ZoomIn, ZoomOut, Maximize2 } from 'lucide-svelte';
     import { getNetworkGraph } from '$lib/agents/network';
     import { builtInTemplates, type DagTemplate } from '$lib/timeline/dagTemplates';
     import type { FsTimeline, FsTimelineEvent, FsEventEdge } from '$lib/agents/fs-db';
@@ -294,6 +295,13 @@
 
     const narrativeTemplates = $derived(builtInTemplates.filter(t => t.category === 'narrative'));
     const technicalTemplates = $derived(builtInTemplates.filter(t => t.category === 'technical'));
+
+    // Fit-view: toggle fitView prop off/on to re-trigger
+    let fitViewEnabled = $state(true);
+    function handleFitView() {
+        fitViewEnabled = false;
+        tick().then(() => { fitViewEnabled = true; });
+    }
 </script>
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -350,15 +358,22 @@
             class="px-3 py-1.5 bg-violet-950/40 border border-violet-600/50 text-[10px] uppercase tracking-widest text-violet-300 hover:bg-violet-900/60 hover:text-violet-100 transition-colors rounded-lg"
             onclick={applyDagreLayout}
         >[ Auto Layout ]</button>
+        <button
+            class="px-3 py-1.5 bg-violet-950/40 border border-violet-600/50 text-[10px] uppercase tracking-widest text-violet-300 hover:bg-violet-900/60 hover:text-violet-100 transition-colors rounded-lg flex items-center gap-1.5"
+            onclick={handleFitView}
+            title="Fit all nodes in view"
+        ><Maximize2 size={11} /> Fit</button>
     </div>
 
     <SvelteFlow
         bind:nodes
         bind:edges
         {nodeTypes}
-        fitView
+        fitView={fitViewEnabled}
         colorMode="dark"
         snapGrid={SNAP_GRID}
+        minZoom={0.05}
+        maxZoom={4}
         deleteKey={['Backspace', 'Delete']}
         onconnect={handleConnect}
         onnodedragstop={handleNodeDragStop}

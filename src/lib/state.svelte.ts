@@ -34,6 +34,7 @@ export type Glyph = {
     specialistRole?: string;
     isCompletionModel?: boolean;
     isPolisherEngine?: boolean;
+    pipeline?: string[];
 };
 
 export class AppState {
@@ -48,6 +49,8 @@ export class AppState {
 
     activeTimelineEventId = $state<string | null>(null);
     editorCursorPos = $state<number>(0);
+    /** Bumped after reloadProjectData — lets Editor know content may have changed externally. */
+    contentVersion = $state(0);
 
     // Navigation History
     history = $state<ActiveItem[]>([]);
@@ -101,6 +104,7 @@ export class AppState {
             this.wikiEntries = wikis || [];
             this.timelines = times || [];
             this.folders = flds || [];
+            this.contentVersion++;
         } catch (err) {
             console.error('Failed to load project data:', err);
             this.documents = [];

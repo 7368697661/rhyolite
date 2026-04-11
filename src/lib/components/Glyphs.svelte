@@ -22,6 +22,7 @@
     let specialistRole = $state('');
     let isCompletionModel = $state(false);
     let isPolisherEngine = $state(false);
+    let pipelineStr = $state('');
 
     // Sync form with active glyph only when the selected glyph changes
     let currentGlyphId = $state<string | null>(null);
@@ -40,6 +41,7 @@
                 specialistRole = activeGlyph.specialistRole || '';
                 isCompletionModel = activeGlyph.isCompletionModel || false;
                 isPolisherEngine = activeGlyph.isPolisherEngine || false;
+                pipelineStr = (activeGlyph.pipeline || []).join(', ');
             } else {
                 name = '';
                 model = 'gemini-1.5-pro';
@@ -50,6 +52,7 @@
                 specialistRole = '';
                 isCompletionModel = false;
                 isPolisherEngine = false;
+                pipelineStr = '';
             }
         }
     });
@@ -66,7 +69,8 @@
             role,
             specialistRole: specialistRole || undefined,
             isCompletionModel: isCompletionModel || undefined,
-            isPolisherEngine: isPolisherEngine || undefined
+            isPolisherEngine: isPolisherEngine || undefined,
+            pipeline: pipelineStr ? pipelineStr.split(',').map(s => s.trim()).filter(Boolean) : undefined
         };
         
         // Optimistically update local state so UI doesn't reset mid-typing
@@ -271,6 +275,23 @@
                                 </select>
                                 <div class="text-[9px] text-violet-400/80 w-1/2 leading-relaxed">
                                     Sculptors delegate work to chisels tagged with the required <span class="text-violet-300">researcher</span>, <span class="text-violet-300">writer</span>, or <span class="text-violet-300">auditor</span> role during multi-step carving sessions.
+                                </div>
+                            </div>
+                        </div>
+                        {:else}
+                        <div class="space-y-2 col-span-2 border-t border-violet-900/40 pt-4 mt-2">
+                            <label for="glyph-pipeline" class="block text-[10px] uppercase tracking-widest text-violet-500 font-bold">Research Pipeline</label>
+                            <div class="flex gap-4 items-center">
+                                <input 
+                                    id="glyph-pipeline"
+                                    type="text"
+                                    bind:value={pipelineStr}
+                                    oninput={handleSave}
+                                    placeholder="e.g. researcher, writer, auditor"
+                                    class="flex-1 bg-[#020005] border border-violet-700/40 rounded-lg px-4 py-2 text-violet-100 outline-none focus:border-violet-500 transition-all font-mono text-xs"
+                                />
+                                <div class="text-[9px] text-violet-400/80 w-1/2 leading-relaxed">
+                                    Comma-separated list of chisel tags to run sequentially during <span class="text-violet-300">Research</span> mode.
                                 </div>
                             </div>
                         </div>

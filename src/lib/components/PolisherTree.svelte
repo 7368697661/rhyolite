@@ -1,6 +1,7 @@
 <script lang="ts">
     import { ChevronRight, ChevronDown, Focus, Gem } from 'lucide-svelte';
     import type { GemNode } from '$lib/polisher/types';
+    import PolisherTree from './PolisherTree.svelte';
 
     let {
         node,
@@ -30,7 +31,7 @@
     <!-- Node row -->
     <div
         class="group flex items-center gap-1 py-1 px-1.5 rounded cursor-pointer transition-colors
-            {isActive ? 'bg-cyan-900/40 border border-cyan-600/50' : 'border border-transparent hover:bg-cyan-950/40 hover:border-cyan-800/30'}"
+            {isActive ? 'bg-violet-900/40 border border-violet-600/50' : 'border border-transparent hover:bg-violet-950/40 hover:border-violet-800/30'}"
         role="button"
         tabindex="0"
         onclick={() => onSelect(node.id)}
@@ -39,7 +40,7 @@
         <!-- Expand/collapse toggle -->
         {#if hasChildren}
             <button
-                class="p-0.5 text-cyan-700 hover:text-cyan-400 transition-colors shrink-0"
+                class="p-0.5 text-violet-700 hover:text-violet-400 transition-colors shrink-0"
                 onclick={(e) => { e.stopPropagation(); expanded = !expanded; }}
             >
                 {#if expanded}
@@ -53,23 +54,23 @@
         {/if}
 
         <!-- Node icon -->
-        <Gem size={9} class="{isActive ? 'text-cyan-400' : 'text-cyan-800'} shrink-0" />
+        <Gem size={9} class="{isActive ? 'text-violet-400' : 'text-violet-800'} shrink-0" />
 
         <!-- Node text preview -->
-        <span class="text-[9px] font-mono truncate {isActive ? 'text-cyan-200' : 'text-cyan-600'}">
+        <span class="text-[9px] font-mono truncate {isActive ? 'text-violet-200' : 'text-violet-600'}">
             {truncated}
         </span>
 
         <!-- Child count badge -->
         {#if hasChildren}
-            <span class="text-[8px] text-cyan-800 font-mono ml-auto shrink-0">
+            <span class="text-[8px] text-violet-800 font-mono ml-auto shrink-0">
                 {node.children.length}
             </span>
         {/if}
 
         <!-- Focus/zoom button -->
         <button
-            class="p-0.5 text-cyan-800 hover:text-cyan-400 opacity-0 group-hover:opacity-100 transition-all shrink-0"
+            class="p-0.5 text-violet-800 hover:text-violet-400 opacity-0 group-hover:opacity-100 transition-all shrink-0"
             onclick={(e) => { e.stopPropagation(); onFocus(node.id); }}
             title="Focus on this branch"
         >
@@ -81,7 +82,7 @@
     {#if expanded && hasChildren}
         <div>
             {#each node.children as child (child.id)}
-                <svelte:self
+                <PolisherTree
                     node={child}
                     {activeNodeId}
                     depth={depth + 1}

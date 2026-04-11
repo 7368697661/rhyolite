@@ -3,7 +3,10 @@
     "allow": [
       "Bash(cargo check:*)",
       "Bash(npx svelte-check:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(find:*)",
+      "Bash(node:*)",
+      "Bash(head -50 /Users/moka/Documents/frontend-test/src/lib/components/*.svelte)"
     ]
   }
 }

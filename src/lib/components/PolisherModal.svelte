@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { X, Gem, RotateCw, Check, Loader2, PanelLeftOpen, PanelLeftClose, ZoomOut } from 'lucide-svelte';
+    import { X, Gem, RotateCw, Square, Check, Loader2, PanelLeftOpen, PanelLeftClose, ZoomOut } from 'lucide-svelte';
     import { fade, scale } from 'svelte/transition';
     import { backOut } from 'svelte/easing';
     import { executePolisherGeneration } from '$lib/agents/infill';
@@ -220,18 +220,18 @@
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
-        class="flex h-[85vh] w-[95vw] max-w-7xl flex-col border border-cyan-600/50 bg-[#020005] shadow-2xl shadow-cyan-900/20 rounded-lg overflow-hidden"
+        class="flex h-[85vh] w-[95vw] max-w-7xl flex-col border border-violet-600/50 bg-[#020005] shadow-2xl shadow-violet-900/20 rounded-lg overflow-hidden"
         onclick={(e) => e.stopPropagation()}
         transition:scale={{ duration: 300, start: 0.95, easing: backOut }}
     >
         <!-- Header -->
-        <div class="flex items-center justify-between border-b border-cyan-700/40 px-5 py-3 bg-black/60">
+        <div class="flex items-center justify-between border-b border-violet-700/40 px-5 py-3 bg-black/60">
             <div class="flex items-center gap-3">
-                <Gem size={16} class="text-cyan-400" />
-                <h2 class="text-[11px] font-bold uppercase tracking-[0.2em] text-cyan-300">
+                <Gem size={16} class="text-violet-400" />
+                <h2 class="text-[11px] font-bold uppercase tracking-[0.2em] text-violet-300">
                     The Polisher
                 </h2>
-                <span class="text-[9px] uppercase tracking-widest text-cyan-600 border border-cyan-800/50 px-2 py-0.5 rounded">
+                <span class="text-[9px] uppercase tracking-widest text-violet-600 border border-violet-800/50 px-2 py-0.5 rounded">
                     {modeLabel}
                 </span>
             </div>
@@ -239,8 +239,8 @@
                 <!-- Gems toggle -->
                 <button
                     onclick={() => showGems = !showGems}
-                    class="flex items-center gap-1.5 border border-cyan-800/50 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest transition-colors rounded-md
-                        {showGems ? 'bg-cyan-900/40 text-cyan-200 border-cyan-600/60' : 'bg-transparent text-cyan-600 hover:text-cyan-400 hover:border-cyan-700'}"
+                    class="flex items-center gap-1.5 border border-violet-800/50 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest transition-colors rounded-md
+                        {showGems ? 'bg-violet-900/40 text-violet-200 border-violet-600/60' : 'bg-transparent text-violet-600 hover:text-violet-400 hover:border-violet-700'}"
                 >
                     {#if showGems}
                         <PanelLeftClose size={11} />
@@ -249,17 +249,26 @@
                     {/if}
                     Gems
                 </button>
-                <button
-                    onclick={generate}
-                    disabled={isGenerating}
-                    class="flex items-center gap-1.5 border border-cyan-700/60 bg-cyan-950/40 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-cyan-300 hover:border-cyan-500 hover:text-cyan-100 transition-colors rounded-md disabled:opacity-50"
-                >
-                    <RotateCw size={11} class={isGenerating ? "animate-spin" : ""} />
-                    {isGenerating ? "Generating..." : "Generate Facets"}
-                </button>
+                {#if isGenerating}
+                    <button
+                        onclick={() => abortController?.abort()}
+                        class="flex items-center gap-1.5 border border-red-500/60 bg-red-900/30 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-red-300 hover:bg-red-800/50 hover:border-red-400 transition-colors rounded-md"
+                    >
+                        <Square size={11} />
+                        Stop
+                    </button>
+                {:else}
+                    <button
+                        onclick={generate}
+                        class="flex items-center gap-1.5 border border-violet-700/60 bg-violet-950/40 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-violet-300 hover:border-violet-500 hover:text-violet-100 transition-colors rounded-md"
+                    >
+                        <RotateCw size={11} />
+                        Generate Facets
+                    </button>
+                {/if}
                 <button
                     onclick={onClose}
-                    class="border border-cyan-800/60 bg-black px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide text-cyan-400 hover:border-cyan-600 hover:text-cyan-200 rounded-md transition-colors"
+                    class="border border-violet-800/60 bg-black px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide text-violet-400 hover:border-violet-600 hover:text-violet-200 rounded-md transition-colors"
                 >
                     <X size={12} />
                 </button>
@@ -270,13 +279,13 @@
         <div class="flex flex-1 min-h-0">
             <!-- Pane 1: Gems Tree (collapsible left) -->
             {#if showGems}
-                <div class="w-56 shrink-0 flex flex-col min-h-0 bg-[#010003] border-r border-cyan-800/30">
-                    <div class="px-3 py-2 border-b border-cyan-900/30 flex items-center justify-between">
-                        <span class="text-[9px] uppercase tracking-widest text-cyan-600 font-bold">Gem Tree</span>
+                <div class="w-56 shrink-0 flex flex-col min-h-0 bg-[#010003] border-r border-violet-800/30">
+                    <div class="px-3 py-2 border-b border-violet-900/30 flex items-center justify-between">
+                        <span class="text-[9px] uppercase tracking-widest text-violet-600 font-bold">Gem Tree</span>
                         {#if rootViewId}
                             <button
                                 onclick={zoomOut}
-                                class="flex items-center gap-1 text-[9px] text-cyan-600 hover:text-cyan-300 transition-colors"
+                                class="flex items-center gap-1 text-[9px] text-violet-600 hover:text-violet-300 transition-colors"
                             >
                                 <ZoomOut size={10} />
                                 Zoom Out
@@ -295,30 +304,30 @@
             {/if}
 
             <!-- Pane 2: Facets (middle) -->
-            <div class="flex-1 flex flex-col min-h-0 bg-[#030008] border-r border-cyan-800/30">
-                <div class="px-4 py-2 border-b border-cyan-900/30 flex items-center justify-between">
+            <div class="flex-1 flex flex-col min-h-0 bg-[#030008] border-r border-violet-800/30">
+                <div class="px-4 py-2 border-b border-violet-900/30 flex items-center justify-between">
                     <div>
-                        <span class="text-[9px] uppercase tracking-widest text-cyan-600 font-bold">Facets</span>
+                        <span class="text-[9px] uppercase tracking-widest text-violet-600 font-bold">Facets</span>
                         {#if activeNode.parentId !== null}
-                            <span class="text-[9px] text-cyan-800 ml-2">
+                            <span class="text-[9px] text-violet-800 ml-2">
                                 from: {activeNode.text ? activeNode.text.slice(0, 30) + '...' : 'node'}
                             </span>
                         {/if}
                     </div>
-                    <span class="text-[9px] text-cyan-800">Click Use or Drill to branch deeper</span>
+                    <span class="text-[9px] text-violet-800">Click Use or Drill to branch deeper</span>
                 </div>
                 <div class="flex-1 overflow-y-auto p-4 space-y-3">
                     {#each displayFacets as gen, i}
-                        <div class="group border border-cyan-800/30 bg-black/40 rounded-lg overflow-hidden hover:border-cyan-600/50 transition-colors">
-                            <div class="flex items-center justify-between px-3 py-1.5 border-b border-cyan-900/20 bg-cyan-950/20">
-                                <span class="text-[9px] uppercase tracking-widest text-cyan-600 font-bold">
+                        <div class="group border border-violet-800/30 bg-black/40 rounded-lg overflow-hidden hover:border-violet-600/50 transition-colors">
+                            <div class="flex items-center justify-between px-3 py-1.5 border-b border-violet-900/20 bg-violet-950/20">
+                                <span class="text-[9px] uppercase tracking-widest text-violet-600 font-bold">
                                     Facet {i + 1}
                                 </span>
                                 <div class="flex gap-1.5">
                                     {#if !isGenerating && activeNode.children[i]}
                                         <button
                                             onclick={() => drillInto(i)}
-                                            class="text-[9px] uppercase tracking-widest text-cyan-700 hover:text-cyan-300 transition-colors px-2 py-0.5 border border-transparent hover:border-cyan-700/50 rounded"
+                                            class="text-[9px] uppercase tracking-widest text-violet-700 hover:text-violet-300 transition-colors px-2 py-0.5 border border-transparent hover:border-violet-700/50 rounded"
                                         >
                                             Drill
                                         </button>
@@ -326,7 +335,7 @@
                                     <button
                                         onclick={() => useGeneration(i)}
                                         disabled={!gen}
-                                        class="text-[9px] uppercase tracking-widest text-cyan-500 hover:text-cyan-200 disabled:opacity-30 transition-colors px-2 py-0.5 border border-transparent hover:border-cyan-700/50 rounded"
+                                        class="text-[9px] uppercase tracking-widest text-violet-500 hover:text-violet-200 disabled:opacity-30 transition-colors px-2 py-0.5 border border-transparent hover:border-violet-700/50 rounded"
                                     >
                                         Use
                                     </button>
@@ -336,12 +345,12 @@
                                 {#if gen}
                                     {gen}
                                 {:else if isGenerating}
-                                    <span class="flex items-center gap-2 text-cyan-700 text-xs">
+                                    <span class="flex items-center gap-2 text-violet-700 text-xs">
                                         <Loader2 size={12} class="animate-spin" />
                                         Streaming...
                                     </span>
                                 {:else}
-                                    <span class="text-cyan-800 text-xs italic">No output</span>
+                                    <span class="text-violet-800 text-xs italic">No output</span>
                                 {/if}
                             </div>
                         </div>
@@ -369,7 +378,7 @@
                 <textarea
                     bind:this={polishAreaRef}
                     bind:value={polishedText}
-                    class="flex-1 resize-none bg-transparent p-5 text-[15px] leading-relaxed text-violet-100 outline-none placeholder:text-cyan-900 font-sans"
+                    class="teal-scrollbar flex-1 resize-none bg-transparent p-5 text-[15px] leading-relaxed text-violet-100 outline-none placeholder:text-cyan-900 font-sans"
                     placeholder="Select facets to import text here, then mix and refine your final version..."
                     spellcheck="false"
                 ></textarea>

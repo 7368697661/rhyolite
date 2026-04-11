@@ -7,7 +7,7 @@ export type StreamChunk = { channel: StreamChannel; text: string };
 // NDJSON event types for the agent protocol
 // ---------------------------------------------------------------------------
 
-export type ChatMode = "ask" | "agent" | "plan";
+export type ChatMode = "ask" | "agent" | "plan" | "research" | "write";
 
 /** Content or reasoning delta (existing) */
 export type NdjsonContent = { t: "c"; d: string };
@@ -64,6 +64,8 @@ export type NdjsonSubAgent = {
     glyphId: string;
     glyphName: string;
     text?: string;
+    step?: number;
+    totalSteps?: number;
   };
 };
 

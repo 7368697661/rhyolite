@@ -621,6 +621,8 @@ pub struct FsGlyph {
     pub is_completion_model: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_polisher_engine: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pipeline: Option<Vec<String>>,
 }
 
 #[tauri::command]

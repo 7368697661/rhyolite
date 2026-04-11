@@ -1,5 +1,6 @@
 import { readProject, listWikiEntries, readGlyphs, type FsGlyph } from "./fs-db";
 import { streamModel } from "./providers";
+import { retrieveSimilar } from "./embeddings";
 
 export interface InfillParams {
   projectId: string;
@@ -100,11 +101,12 @@ export async function executePolisherGeneration(params: PolisherParams): Promise
     throw new Error("No Glyph is marked as a Polisher Engine. Enable the toggle on a Glyph in the registry.");
   }
 
-  // Build context
+  // Build context with smart wiki retrieval (keyword + embedding match)
   const project = await readProject(projectId).catch(() => null);
   const wikiEntries = await listWikiEntries(projectId).catch(() => []);
 
-  let systemInstruction = `You are an expert prose polisher. Generate high-quality creative writing that blends naturally with the surrounding text. Return ONLY the generated text with no commentary, preamble, or meta-discussion.`;
+  let systemInstruction = polisherGlyph.systemInstruction || polisherGlyph.role ||
+    `You are an expert prose polisher. Generate high-quality creative writing that blends naturally with the surrounding text. Return ONLY the generated text with no commentary, preamble, or meta-discussion.`;
 
   if (project?.loreBible) {
     systemInstruction += `\n\n---\nLORE BIBLE:\n${project.loreBible}`;
@@ -112,9 +114,53 @@ export async function executePolisherGeneration(params: PolisherParams): Promise
   if (project?.storyOutline) {
     systemInstruction += `\n\n---\nSTORY OUTLINE:\n${project.storyOutline}`;
   }
+
+  // Smart wiki retrieval: keyword match against surrounding text + embedding search
   if (wikiEntries.length > 0) {
-    const wikiContext = wikiEntries.slice(0, 20).map(w => `### ${w.title}\n${w.content}`).join("\n\n");
-    systemInstruction += `\n\n---\nWIKI ENTRIES:\n${wikiContext}`;
+    const searchCorpus = (selectedText + "\n" + fullContent.slice(Math.max(0, cursorPos - 4000), cursorPos + 1000)).toLowerCase();
+    const keywordMatched = new Set<string>();
+    const matchedWikis = wikiEntries.filter(w => {
+      const title = w.title.toLowerCase();
+      if (searchCorpus.includes(title)) { keywordMatched.add(w.id); return true; }
+      const words = title.split(/\s+/).filter(word => word.length >= 3);
+      for (const word of words) {
+        if (searchCorpus.includes(word)) { keywordMatched.add(w.id); return true; }
+      }
+      const aliases = (w.aliases || "").toLowerCase().split(",").map(s => s.trim()).filter(Boolean);
+      for (const a of aliases) {
+        if (searchCorpus.includes(a)) { keywordMatched.add(w.id); return true; }
+      }
+      return false;
+    });
+
+    // Embedding-based retrieval for entries not caught by keywords
+    try {
+      const embeddingQuery = selectedText || fullContent.slice(Math.max(0, cursorPos - 2000), cursorPos);
+      if (embeddingQuery.trim().length > 0) {
+        const similar = await retrieveSimilar(projectId, embeddingQuery, 8);
+        for (const hit of similar) {
+          if (hit.type === "wiki" && !keywordMatched.has(hit.id)) {
+            const entry = wikiEntries.find(w => w.id === hit.id);
+            if (entry) matchedWikis.push(entry);
+          }
+        }
+      }
+    } catch { /* embedding retrieval is optional */ }
+
+    if (matchedWikis.length > 0) {
+      // Cap wiki context at 12K chars to stay friendly to smaller models.
+      // Keyword matches are prioritized (added first), embedding matches fill remaining space.
+      const MAX_WIKI_CHARS = 12000;
+      let wikiContext = "";
+      for (const w of matchedWikis) {
+        const entry = `### ${w.title}\n${w.content}\n\n`;
+        if (wikiContext.length + entry.length > MAX_WIKI_CHARS) break;
+        wikiContext += entry;
+      }
+      if (wikiContext) {
+        systemInstruction += `\n\n---\nRELEVANT WIKI ENTRIES:\n${wikiContext}`;
+      }
+    }
   }
 
   const isRewrite = selectedText.length > 0;

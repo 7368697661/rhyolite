@@ -6,7 +6,7 @@
 </script>
 
 <div
-    class="bg-[#0a0514] border p-3 min-w-[200px] font-mono text-[10px] uppercase tracking-widest text-violet-300 relative transition-all rounded-lg"
+    class="bg-[#0a0514] border p-3 min-w-[220px] font-mono text-[11px] uppercase tracking-widest text-violet-300 relative transition-all rounded-lg"
     style="border-color: {selected ? '#c4b5fd' : customColor}; box-shadow: {selected ? `0 0 20px ${customColor}80` : `0 0 15px ${customColor}26`};"
 >
     <Handle

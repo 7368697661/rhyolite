@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [v0.5.0] - 2026-04-10 (Write Pipeline, Polisher UX & Branding)
+
+### Added
+- **The Polisher (multi-generation refining)**: New 3-pane prose refinement tool (`Cmd+Shift+P` or floating "Polish" button). Generates 3 parallel variations ("Facets") of selected text or forward-generates from cursor position. Features a branching Gem Tree for iterative deepening — drill into promising facets to generate further variants, building a tree of refinements. A Polishing Wheel (right pane) lets you manually assemble and edit a final version from any combination of facets before applying back to the document. Requires a Glyph with "Polisher Engine" enabled. Enriches context with lore bible, story outline, and relevant wiki entries (keyword + embedding retrieval, capped at 12K chars). Supports non-chat completion models via the "Completion Engine" toggle.
+- **Polisher Glyph configuration**: New `isPolisherEngine` and `isCompletionModel` toggles in the Glyph Registry. Polisher Engine designates which glyph powers multi-generation. Completion Engine enables raw `/completions` endpoints for models like Llama 3.1 405B via OpenRouter, vLLM, or Ollama.
+- **Advanced Gem Tree navigation**: Gem Tree (left pane) supports expand/collapse, subtree focus/zoom, active node highlighting, and child count badges. Context resolution walks from active node to root, concatenating all branch text so deeper generations carry cumulative context.
+- **Write Pipeline (researcher → writer → auditor)**: New automatic 3-stage write mode. Selecting "WRITE" in Studio auto-discovers chisels tagged `researcher`, `writer`, and `auditor`, runs them sequentially with role-locked tool access, and writes directly to the active document. The sculptor's final turn is limited to a brief summary — no content regurgitation.
+- **Role-locked tool permissions**: Each pipeline role gets scoped tools — researcher gets read-only search/read tools, writer gets `write_draft`/`append_to_draft`/`replace_in_draft`, auditor gets `read_draft`/`replace_in_draft`. Prevents cross-role pollution.
+- **Pipeline progress UI**: Chisel cards in Studio show step count (`1/3`, `2/3`, `3/3`), a teal progress bar, and expandable output per step. Pipeline completion state clearly indicated.
+- **Chat auto-scroll**: Chat pane now follows streaming output as it arrives. Scrolling up during generation detaches from the bottom so you can read at your own pace; new messages re-anchor to bottom.
+- **Teal scrollbars**: Scrollable elements with teal/cyan theming (chisel cards, Polishing Wheel textarea) now use matching teal scrollbar styling instead of the default violet.
+- **Quarry zoom range**: Canvas `minZoom` lowered to `0.05` (from default `0.5`) and `maxZoom` raised to `4`, plus a `[ Fit ]` button in the toolbar to frame all nodes.
+- **App icon & branding**: Custom `rhyo_icon.png` generated into all Tauri icon formats (icns, ico, PNGs) via `tauri icon`. Favicon added to `app.html`. Cargo package renamed from `app` to `rhyolite` — dock now shows "Rhyolite" instead of "app".
+
+### Changed
+- **Pipeline role instructions**: Researcher produces concise briefs (facts, characters, locations, plot points). Writer must call `write_draft` once with complete text and uses plain prose paragraphs (no markdown blockquote abuse). Auditor reads the draft first, checks factual consistency/voice/coherence/formatting, and only fixes specific issues.
+- **Specialist inner loop**: `runSpecialistInnerLoop` now returns `{ summary, toolCallNames }` instead of a plain string, enabling the pipeline to verify which tools were actually called.
+- **Markdown rendering (marked v15 fix)**: Rewrote blockquote/callout renderers in both Editor and Chat to handle marked v15's raw-text `blockquote({ text })` API. Inline markdown (links, italics, bold) inside callouts now renders correctly via `marked.parseInline()`.
+- **DOMPurify in Editor**: Added `ADD_ATTR: ['class', 'target', 'rel']` and `#entity:` protocol hook (matching Chat.svelte) so entity links, callout classes, and dead-link styling survive sanitization in reading mode.
+- **Reading mode spacing**: Added CSS rules for generous paragraph spacing (`p + p` gets `1.4em`), heading breathing room (`2em` top), blockquote/hr margins, and `<br>` spacing in the preview pane.
+- **Node sizing**: TacticalNode bumped to `min-w-220px` / `text-[11px]` for better legibility at far zoom.
+
+### Fixed
+- **Callouts not rendering inline markdown**: Entity links (`[name](#entity:...)`) , italics, and bold inside `> [!quote]` and other callout types showed as raw text due to marked v15 API change. Fixed by parsing raw blockquote text with `marked.parseInline()` before injecting into callout HTML.
+- **Write mode outputting to chat instead of document**: After the write pipeline, the sculptor would dump full chapter content into the chat. Fixed by stripping tools and injecting a summary-only instruction after successful pipeline completion.
+
 ## [v0.4.0] - 2026-04-07 (SvelteKit + Tauri Desktop)
 
 ### Added

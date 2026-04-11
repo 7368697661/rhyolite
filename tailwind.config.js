@@ -9,8 +9,7 @@ const config = {
         sans: ["Assistant", "sans-serif"],
         mono: ["Monaspace Neon", "monospace"],
         heading: ["Nightingale", "sans-serif"],
-        serif: ["Cormorant Garamond", "serif"],
-        italics: ["Fraunces", "serif"],
+        serif: ["Fraunces", "serif"],
       },
       colors: {
         background: "var(--background)",
